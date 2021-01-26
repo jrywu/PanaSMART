@@ -1,0 +1,11 @@
+{
+  "domain": "panasonic_ac_saa4",
+  "name": "Panasonic SMART",
+  "config_flow": true,
+  "documentation": "",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [
+    "@jrywjwu"
+  ]
+}

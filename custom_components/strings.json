@@ -1,0 +1,21 @@
+{
+    "config": {
+        "title": "Panasonic SMART",
+        "step": {
+            "user": {
+                "title": "Configure Panasonic SMART",
+                "description": "Enter username and password registered in Panasonic SMART app.",
+                "data": {
+                    "username": "Username",
+                    "password": "Passowrd",
+                    "host": "Host"
+                }
+            }
+        },
+        "abort": {
+            "device_timeout": "Timeout connecting to the server.",
+            "device_fail": "Unexpected error creating Appliance.",
+            "already_configured": "Appliance is already configured"
+        }
+    }
+}
