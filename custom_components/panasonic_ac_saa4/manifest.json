@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "domain": "panasonic_ac_saa4",
   "name": "Panasonic SMART",
   "config_flow": true,
