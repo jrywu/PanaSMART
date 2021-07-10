@@ -387,6 +387,7 @@ class PanasonicSAA4Api:
                         'headers = ' + json.dumps(headers) + '.'))
             response_json = await response.json()
             info = response_json.get('devices')[0].get('Info')
+
             if response_json.get('status') == 'success':
                 return info
             else:
@@ -795,12 +796,12 @@ class Appliance:
 
     async def async_update(self):
         """Async update appliance status.
-
         Return True if update succeess.
-
         """
-        if self.power == 'off': #stop async_update if appliance is off
-            return
+        if(self.debug):
+            _LOGGER.debug(
+                "%s:async_update():power is %s", self.name, self.power)
+
         if self.last_update is not None:
             delta = datetime.datetime.now()-self.last_update
             if delta.total_seconds() < 300:
@@ -822,11 +823,12 @@ class Appliance:
                     self.last_update.strftime("%H:%M:%S"), str(delta))
 
         self.last_update = datetime.datetime.now()
-        if self.type == 1: #AC
+        if self.type == 1 and self.power != 'off': #AC
             info = await self.api.device_status(self.device,
                                                 [0, 1, 4, 0x21, 2, 0xf, 3])
             if info is None or len(info) != 7:
                 _LOGGER.error("%s async_update() failed.", self.name)
+                return
             else:
                 if info[0]['status'] is not None and info[0]['status'] == '0':
                     self.power = 'off'
@@ -845,14 +847,20 @@ class Appliance:
                     self.swing_mode = 'auto'
                 else:
                     self.swing_mode = str(info[5]['status'])
-        if self.type == 4: #Dehumidifier
+                if(self.debug):
+                    print(self.get_status())
+                _LOGGER.debug(
+                    "%s:async_update():%s", self.name, json.dumps(self.get_status()))
+
+        if self.type == 4 and self.power != 'off': #Dehumidifier
             info = await self.api.device_status(self.device,
                                                 [0x50, 0, 1, 7, 0xa, 4])
-            if(self.debug):
-                print('info:', info)
             if info is None or len(info) != 6:
                 _LOGGER.error("%s async_update() failed.")
+                return
             else:
+                if(self.debug):
+                    print('info:', info)
                 if info[1]['status'] is not None and info[1]['status'] == '0':
                     self.power = 'off'
                     self.operation_mode = 'off'
@@ -866,11 +874,13 @@ class Appliance:
                 self.target_humidity = int(self.humidity_mode_list[int(info[5]['status'])][0:2]) #target humity
                 await self.async_update_fan_swing_mode()
 
+                if(self.debug):
+                    print(self.get_status())
+                _LOGGER.debug(
+                    "%s:async_update():%s", self.name, json.dumps(self.get_status()))
 
-        if(self.debug):
-            print(self.get_status())
-        _LOGGER.debug(
-            "%s:async_update():%s", self.name, json.dumps(self.get_status()))
+
+
 
     def get_status(self):
         """Return current status from local stored values."""
@@ -896,6 +906,10 @@ class Appliance:
     async def async_update_operation_mode(self):
         """Async update appliance operation mode."""
         info = await self.api.device_status(self.device, [0, 1])
+        if info is None:
+            _LOGGER.error(
+                "%s:async_update_operation_mode() update status failed", self.name)
+            return
         if info[0]['status'] is not None and info[0]['status'] == '1':
             self.power = 'on'
         else:
@@ -931,6 +945,10 @@ class Appliance:
         """Async update temperatures."""
         _LOGGER.debug("async_update_temperatures")
         info = await self.api.device_status(self.device, [4, 0x21, 2, 0xf, 3])
+        if info is None:
+            _LOGGER.error(
+                "%s:async_update_temperatures() update status failed", self.name)
+            return
         self.target_temperature = int(info[4]['status'])
         self.swing_mode = info[3]['status']
         self.inside_temperature = int(info[0]['status'])
@@ -941,6 +959,10 @@ class Appliance:
         """Async update temperatures."""
         _LOGGER.debug("async_update_humidity")
         info = await self.api.device_status(self.device, [4, 7, 0xa])
+        if info is None:
+            _LOGGER.error(
+                "%s:async_update_humidity() update status failed", self.name)
+            return
         self.humidity = int(info[1]['status']) #humity
         self.target_humidity = int(self.humidity_mode_list[int(info[0]['status'])][0:2]) #target humity
         self.tank_full = info[2]['status'] == '1'
@@ -1060,6 +1082,10 @@ class Appliance:
             command = [0xe, 0x9]
 
         info = await self.api.device_status(self.device, command)
+        if info is None:
+            _LOGGER.error(
+                "%s:async_update_fan_swing_mode() update status failed", self.name)
+            return
 
         if self.type == 1: #AC
             if info[0]['status'] is not None and info[0]['status'] == '0':
