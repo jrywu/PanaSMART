@@ -1,4 +1,4 @@
-"""Support for the Pansonic SMART applicances  with SAA4 gateway."""
+"""Support for the Pansonic HVAC with SAA4 gateway."""
 import logging
 
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
@@ -352,3 +352,4 @@ class PanasonicClimate(ClimateEntity):
             "sw_version": "0.0",
             "via_device": self._api.get_gwid(),
         }
+

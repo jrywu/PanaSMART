@@ -1,6 +1,7 @@
 {
   "domain": "panasonic_ac_saa4",
   "name": "Panasonic SMART",
+   "version": "1.0",
   "config_flow": true,
   "documentation": "",
   "requirements": [],

@@ -1,4 +1,4 @@
-"""Config flow for the Panasonic SMART platform."""
+"""Config flow for the Daikin platform."""
 import asyncio
 import logging
 
@@ -34,6 +34,7 @@ class panaSMARTCongfiFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                                  default='ems2.panasonic.com.tw'): str,
                 })
             )
+        #return await self.async_abort(reason='already_configure')
         return await self.async_step_import(user_input)
 
     async def async_step_import(self, config):

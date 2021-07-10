@@ -59,9 +59,9 @@ async def async_setup_entry(hass: HomeAssistantType, entry: ConfigEntry):
     """Establish connection to Panasonic cloud server and discover connected
         devices in the specified account."""
     conf = entry.data
-    _LOGGER.debug("panasonic_ac_saa4.async_setup_entry(): username: %s",  conf[CONF_USERNAME])
     pana_api = hass.data[DOMAIN].get('api')
     if pana_api is None:
+        _LOGGER.debug("panasonic_ac_saa4.async_setup_entry(): username: %s",  conf[CONF_USERNAME])
         pana_api = await pana_api_setup(hass, conf[CONF_USERNAME],
                                         conf[CONF_PASSWORD], conf[CONF_HOST])
         hass.data.setdefault(DOMAIN, {}).update({'api': pana_api})

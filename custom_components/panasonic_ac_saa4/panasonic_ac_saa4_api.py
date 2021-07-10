@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class PanasonicSAA4Api:
-    """Panasonic  SMART applicances control interface with SAAnet 4 protocol."""
+    """Panasonic SMART applicances control interface with SAAnet 4 protocol."""
 
     def __init__(self, debug=False):
         """Initialize the interface."""
@@ -597,7 +597,7 @@ class Appliance:
         self.api = api
         self.device = device
         self.device_id = device['DeviceID']
-        self.type = device['DeviceType']
+        self.type = int(device['DeviceType'])
         self.name = device['NickName']
         self.area_id = device['AreaID']
         self.model_type = device['ModelType']
@@ -663,9 +663,9 @@ class Appliance:
                     if mode[0] == 'Auto':
                         self.fan_mode_list.append('auto')
                     if mode[0] == 'Min':
-                        self.fan_min = mode[1]
+                        self.fan_min = int(mode[1])
                     if mode[0] == 'Max':
-                        self.fan_max = mode[1]
+                        self.fan_max = int(mode[1])
                     if self.fan_max > self.fan_min:
                         for level in range(self.fan_min, self.fan_max+1):
                             self.fan_mode_list.append(str(level))
@@ -674,9 +674,9 @@ class Appliance:
             elif command['CommandType'] == '0x03' and self.type == 1: #AC supported temperature range
                 for mode in command['Parameters']:
                     if mode[0] == 'Min':
-                        self.temp_min = mode[1]
+                        self.temp_min = int(mode[1])
                     if mode[0] == 'Max':
-                        self.temp_max = mode[1]
+                        self.temp_max = int(mode[1])
                 if(self.debug):
                     print('Supported min target temperature ='+ str(self.temp_min) + '; Supported max target temperature=' + str(self.temp_max))
             elif command['CommandType'] == '0x0f' and self.type == 1: #AC supported swing mode list
@@ -684,9 +684,9 @@ class Appliance:
                     if mode[0] == 'Auto':
                         self.swing_mode_list.append('auto')
                     if mode[0] == 'Min':
-                        self.swing_min = mode[1]
+                        self.swing_min = int(mode[1])
                     if mode[0] == 'Max':
-                        self.swing_max = mode[1]
+                        self.swing_max = int(mode[1])
                     if self.swing_max > self.swing_min:
                         for level in range(self.swing_min, self.swing_max+1):
                             self.swing_mode_list.append(str(level))
@@ -797,10 +797,13 @@ class Appliance:
         """Async update appliance status.
 
         Return True if update succeess.
+
         """
+        if self.power == 'off': #stop async_update if appliance is off
+            return
         if self.last_update is not None:
             delta = datetime.datetime.now()-self.last_update
-            if delta.total_seconds() < 10:
+            if delta.total_seconds() < 300:
                 if(self.debug):
                     print(('async_update() too frequent. Last: '
                            '' + self.last_update.strftime("%H:%M:%S") + ''
@@ -825,7 +828,7 @@ class Appliance:
             if info is None or len(info) != 7:
                 _LOGGER.error("%s async_update() failed.", self.name)
             else:
-                if info[0]['status'] == '0':
+                if info[0]['status'] is not None and info[0]['status'] == '0':
                     self.power = 'off'
                     self.operation_mode = 'off'
                 else:
@@ -834,11 +837,11 @@ class Appliance:
                 self.target_temperature = int(info[6]['status'])
                 self.inside_temperature = int(info[2]['status'])
                 self.outside_temperature = int(info[3]['status'])
-                if info[4]['status'] == '0':
+                if info[4]['status'] is not None and info[4]['status'] == '0':
                     self.fan_mode = 'auto'
                 else:
                     self.fan_mode = info[4]['status']
-                if info[5]['status'] == '0':
+                if info[5]['status'] is not None and info[5]['status'] == '0':
                     self.swing_mode = 'auto'
                 else:
                     self.swing_mode = str(info[5]['status'])
@@ -848,9 +851,9 @@ class Appliance:
             if(self.debug):
                 print('info:', info)
             if info is None or len(info) != 6:
-                _LOGGER.error("%s async_update() failed.", self.name)
+                _LOGGER.error("%s async_update() failed.")
             else:
-                if info[1]['status'] == '0':
+                if info[1]['status'] is not None and info[1]['status'] == '0':
                     self.power = 'off'
                     self.operation_mode = 'off'
                 else:
@@ -893,28 +896,16 @@ class Appliance:
     async def async_update_operation_mode(self):
         """Async update appliance operation mode."""
         info = await self.api.device_status(self.device, [0, 1])
-        if info[0]['status'] == '1':
+        if info[0]['status'] is not None and info[0]['status'] == '1':
             self.power = 'on'
         else:
             self.power = 'off'
-        if info[0]['status'] == '0':
+        if self.power == 'off':
             self.operation_mode = 'off'
         elif self.type == 1: #AC
             self.operation_mode = self.ac_operation_mode_list[int(info[1]['status'])]
-            """
-            if info[1]['status'] == '0':
-                self.operation_mode = 'cool'
-            elif info[1]['status'] == '1':
-                self.operation_mode = 'dry'
-            elif info[1]['status'] == '2':
-                self.operation_mode = 'fan'
-            elif info[1]['status'] == '3':
-                self.operation_mode = 'auto'
-            elif info[1]['status'] == '4':
-                self.operation_mode = 'heat'
-            """
         elif self.type == 4: #dehumifier
-            if info[0]['status'] == '0':
+            if info[0]['status'] is not None and info[0]['status'] == '0':
                 self.operation_mode = 'off'
             else:
                 self.operation_mode = 'dry'
@@ -938,15 +929,17 @@ class Appliance:
 
     async def async_update_temperatures(self):
         """Async update temperatures."""
+        _LOGGER.debug("async_update_temperatures")
         info = await self.api.device_status(self.device, [4, 0x21, 2, 0xf, 3])
-        self.target_temperature = info[4]['status']
+        self.target_temperature = int(info[4]['status'])
         self.swing_mode = info[3]['status']
-        self.inside_temperature = info[0]['status']
-        self.outside_temperature = info[1]['status']
+        self.inside_temperature = int(info[0]['status'])
+        self.outside_temperature = int(info[1]['status'])
         self.fan_mode = info[2]['status']
 
     async def async_update_humidity(self):
         """Async update temperatures."""
+        _LOGGER.debug("async_update_humidity")
         info = await self.api.device_status(self.device, [4, 7, 0xa])
         self.humidity = int(info[1]['status']) #humity
         self.target_humidity = int(self.humidity_mode_list[int(info[0]['status'])][0:2]) #target humity
@@ -1069,11 +1062,11 @@ class Appliance:
         info = await self.api.device_status(self.device, command)
 
         if self.type == 1: #AC
-            if info[0]['status'] == '0':
+            if info[0]['status'] is not None and info[0]['status'] == '0':
                 self.fan_mode = 'auto'
             else:
                 self.fan_mode = info[0]['status']
-            if info[1]['status'] == '0':
+            if info[1]['status'] is not None and info[1]['status'] == '0':
                 self.swing_mode = 'auto'
             else:
                 self.swing_mode = str(info[1]['status'])
