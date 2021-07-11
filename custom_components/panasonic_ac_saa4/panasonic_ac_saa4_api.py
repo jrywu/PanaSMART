@@ -12,6 +12,8 @@ import tempfile
 PANASMARTHOST = 'ems2.panasonic.com.tw'
 USERAGENT = ('Dalvik/2.1.0 '
              '(Linux; U; Android 8.0.0 HTC_U-3u Build/OPR6.170623.013)')
+ASYNC_UPDATE_INTERVAL = 300
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -793,7 +795,6 @@ class Appliance:
         """Return hourly power of of the appliance."""
         return await self.api.get_power_log(self.device)
 
-
     async def async_update(self):
         """Async update appliance status.
         Return True if update succeess.
@@ -804,7 +805,7 @@ class Appliance:
 
         if self.last_update is not None:
             delta = datetime.datetime.now()-self.last_update
-            if delta.total_seconds() < 300:
+            if delta.total_seconds() < ASYNC_UPDATE_INTERVAL:
                 if(self.debug):
                     print(('async_update() too frequent. Last: '
                            '' + self.last_update.strftime("%H:%M:%S") + ''
@@ -823,7 +824,7 @@ class Appliance:
                     self.last_update.strftime("%H:%M:%S"), str(delta))
 
         self.last_update = datetime.datetime.now()
-        if self.type == 1 and self.power != 'off': #AC
+        if self.type == 1:# and self.power != 'off': #AC
             info = await self.api.device_status(self.device,
                                                 [0, 1, 4, 0x21, 2, 0xf, 3])
             if info is None or len(info) != 7:
@@ -852,7 +853,7 @@ class Appliance:
                 _LOGGER.debug(
                     "%s:async_update():%s", self.name, json.dumps(self.get_status()))
 
-        if self.type == 4 and self.power != 'off': #Dehumidifier
+        if self.type == 4:# and self.power != 'off': #Dehumidifier
             info = await self.api.device_status(self.device,
                                                 [0x50, 0, 1, 7, 0xa, 4])
             if info is None or len(info) != 6:
@@ -878,8 +879,6 @@ class Appliance:
                     print(self.get_status())
                 _LOGGER.debug(
                     "%s:async_update():%s", self.name, json.dumps(self.get_status()))
-
-
 
 
     def get_status(self):
