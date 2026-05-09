@@ -1,4 +1,6 @@
-"""Constants for Panasonic."""
+﻿"""Constants for Panasonic."""
+from datetime import timedelta
+
 from homeassistant.const import (
     CONF_ICON,
     CONF_NAME,
@@ -21,6 +23,9 @@ from homeassistant.const import (
 import logging
 
 DOMAIN = 'panasonic_smart_app'
+DATA_API = 'api'
+DATA_COORDINATOR = 'coordinator'
+STATUS_UPDATE_INTERVAL = timedelta(minutes=5)
 
 ATTR_TARGET_TEMPERATURE = 'attr_target_temperature'
 ATTR_INSIDE_TEMPERATURE = 'attr_inside_temperature'

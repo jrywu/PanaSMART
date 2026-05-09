@@ -45,10 +45,9 @@ class panasonic_iot_tw_api:
 
 
     # async update all appliance status.
-    async def async_update(self):
+    async def async_update(self, force=False):
         """Async update status of all appliances."""
         if self.appliances is not None:
             for appliance in self.appliances:
-                await appliance.async_update()
-
+                await appliance.async_update(force=force)
 

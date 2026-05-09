@@ -252,14 +252,14 @@ class PanasonicAppliance:
         """Return hourly power of of the appliance."""
         return await self.core.get_power_log(self.device, year_back, months)
 
-    async def async_update(self):
+    async def async_update(self, force=False):
         """Async update appliance status.
         Return True if update success.
         """
         if(self.debug):
             _LOGGER.debug(f"async_update()")
 
-        if self.last_update is not None:
+        if not force and self.last_update is not None:
             delta = datetime.datetime.now()-self.last_update
             if delta.total_seconds() < ASYNC_UPDATE_INTERVAL:
                 if(self.debug):

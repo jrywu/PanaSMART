@@ -1,4 +1,4 @@
-"""Support for the Pansonic dehumidifier with SAA4 gateway."""
+﻿"""Support for the Pansonic dehumidifier with SAA4 gateway."""
 import logging
 
 from homeassistant.components.humidifier import PLATFORM_SCHEMA, HumidifierEntity
@@ -6,7 +6,9 @@ from homeassistant.components.humidifier.const import (
     HumidifierEntityFeature,
     )
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
+    DATA_COORDINATOR,
     DOMAIN,
     )
 
@@ -25,25 +27,28 @@ async def async_setup_platform(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Panasonic dehumidifier based on config_entry."""
-    # pana_api = hass.data[DOMAIN].get(entry.entry_id)
-    pana_api = hass.data[DOMAIN].get('api')
-    appliances = pana_api.get_all_appliances()
-    if appliances is not None:
-        for appliance in appliances:
-            device_type = appliance.get_device_type()
-            if device_type == 4: #Dehumidifer
-                async_add_entities([PanasonicDehumidifier(appliance)])
+    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    async_add_entities([
+        PanasonicDehumidifier(coordinator, appliance)
+        for appliance in coordinator.data.values()
+        if appliance.get_device_type() == 4
+    ])
 
 
-class PanasonicDehumidifier(HumidifierEntity):
+class PanasonicDehumidifier(CoordinatorEntity, HumidifierEntity):
     """Representation of a Panasonic dehumidifier."""
 
-    def __init__(self, api):
+    def __init__(self, coordinator, api):
         """Initialize the dehumidifier device."""
-        self._api = api
+        super().__init__(coordinator)
+        self._appliance_id = api.get_id()
         self.device_type = self._api.get_device_type()
         self._supported_features = HumidifierEntityFeature.MODES
 
+    @property
+    def _api(self):
+        """Return the cached appliance from the coordinator."""
+        return self.coordinator.data[self._appliance_id]
 
     @property
     def supported_features(self):
@@ -64,7 +69,7 @@ class PanasonicDehumidifier(HumidifierEntity):
     @property
     def available(self):
         """Return if the device is available."""
-        return True
+        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
 
 
     @property
@@ -91,7 +96,10 @@ class PanasonicDehumidifier(HumidifierEntity):
         """Set new target humidity."""
         _LOGGER.debug(
             "async_set_humidity() humidity = %s", humidity)
-        await self._api.set_target_humidity(humidity)
+        try:
+            return await self._api.set_target_humidity(humidity)
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def is_on(self):
@@ -118,21 +126,26 @@ class PanasonicDehumidifier(HumidifierEntity):
 
     async def async_turn_on(self):
         """Turn device on."""
-        return await self._api.set_power('on')
+        try:
+            return await self._api.set_power('on')
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     async def async_turn_off(self):
         """Turn device off."""
-        return await self._api.set_power('off')
+        try:
+            return await self._api.set_power('off')
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     async def async_set_mode(self, mode):
         """Set preset mode."""
         _LOGGER.debug(
             "humidifier.async_set_preset_mode() mode = %s", mode)
-        await self._api.set_preset_mode(mode.lower())
-
-    async def async_update(self):
-        """Retrieve latest state."""
-        await self._api.async_update()
+        try:
+            return await self._api.set_preset_mode(mode.lower())
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def device_info(self):

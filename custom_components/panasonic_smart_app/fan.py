@@ -1,9 +1,10 @@
-"""Support for the Panasonic dehumidifier with SAA4 gateway."""
+﻿"""Support for the Panasonic dehumidifier with SAA4 gateway."""
 import logging
 
 from homeassistant.components.fan import FanEntity, FanEntityFeature
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DATA_COORDINATOR, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -19,30 +20,33 @@ async def async_setup_platform(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Panasonic dehumidifier based on config_entry."""
-    # pana_api = hass.data[DOMAIN].get(entry.entry_id)
-    pana_api = hass.data[DOMAIN].get('api')
-    appliances = pana_api.get_all_appliances()
+    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     _LOGGER.debug('Humidifier async_setup_entry.')
-    if appliances is not None:
-        for appliance in appliances:
-            device_type = appliance.get_device_type()
-            if device_type == 4: #Dehumidifier
-                async_add_entities([PanasonicDehumidifierFan(appliance)])
+    async_add_entities([
+        PanasonicDehumidifierFan(coordinator, appliance)
+        for appliance in coordinator.data.values()
+        if appliance.get_device_type() == 4
+    ])
 
 
-class PanasonicDehumidifierFan(FanEntity):
+class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
     """Representation of a Panasonic dehumidifier fan."""
 
-    def __init__(self, api):
+    def __init__(self, coordinator, api):
         """Initialize the dehumidifier device."""
         _LOGGER.debug('Humidifier __init__.')
-        self._api = api
+        super().__init__(coordinator)
+        self._appliance_id = api.get_id()
         self.device_type = self._api.get_device_type()
         self._supported_features = FanEntityFeature.PRESET_MODE
            # | FanEntityFeature.DIRECTION | FanEntityFeature.OSCILLATE
            # SUPPORT_PRESET_MODE | SUPPORT_DIRECTION | SUPPORT_OSCILLATE
         return None
 
+    @property
+    def _api(self):
+        """Return the cached appliance from the coordinator."""
+        return self.coordinator.data[self._appliance_id]
 
     @property
     def supported_features(self):
@@ -62,7 +66,7 @@ class PanasonicDehumidifierFan(FanEntity):
 
     @property
     def available(self):
-        return True
+        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
 
     # @property
     # def is_on(self) -> bool | None:
@@ -98,11 +102,10 @@ class PanasonicDehumidifierFan(FanEntity):
         """Set preset mode."""
         _LOGGER.debug(
             "humidifier.async_set_preset_mode() mode = %s", preset_mode)
-        await self._api.set_fan_mode(preset_mode.lower())
-
-    async def async_update(self):
-        """Retrieve latest state."""
-        await self._api.async_update()
+        try:
+            return await self._api.set_fan_mode(preset_mode.lower())
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def device_info(self):

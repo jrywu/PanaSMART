@@ -1,4 +1,4 @@
-"""Support for the Pansonic HVAC with SAA4 gateway."""
+﻿"""Support for the Pansonic HVAC with SAA4 gateway."""
 import logging
 
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
@@ -22,11 +22,12 @@ from homeassistant.components.climate.const import (
 from homeassistant.const import (
     ATTR_TEMPERATURE, UnitOfTemperature, PRECISION_WHOLE)
 from homeassistant.helpers.temperature import display_temp as show_temp
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
+    DATA_COORDINATOR,
     DOMAIN,
     HA_STATE_TO_PANA,
     PANA_TO_HA_STATE,
-    HA_ATTR_TO_PANA,
     )
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,29 +45,32 @@ async def async_setup_platform(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Panasonic climate based on config_entry."""
-    # pana_api = hass.data[DOMAIN].get(entry.entry_id)
-    pana_api = hass.data[DOMAIN].get('api')
-    appliances = pana_api.get_all_appliances()
-    if appliances is not None:
-        for appliance in appliances:
-            device_type = appliance.get_device_type()
-            if device_type == 1: #AC
-                async_add_entities([PanasonicClimate(appliance)])
+    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    async_add_entities([
+        PanasonicClimate(coordinator, appliance)
+        for appliance in coordinator.data.values()
+        if appliance.get_device_type() == 1
+    ])
 
 
 
-class PanasonicClimate(ClimateEntity):
+class PanasonicClimate(CoordinatorEntity, ClimateEntity):
     """Representation of a Panasonic HVAC."""
 
-    def __init__(self, api):
+    def __init__(self, coordinator, api):
         """Initialize the climate device."""
-        self._api = api
+        super().__init__(coordinator)
+        self._appliance_id = api.get_id()
         self.device_type = self._api.get_device_type()
         self._supported_features = ClimateEntityFeature.FAN_MODE \
             | ClimateEntityFeature.SWING_MODE | ClimateEntityFeature.TARGET_TEMPERATURE \
             | ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
         self._enable_turn_on_off_backwards_compatibility = False
 
+    @property
+    def _api(self):
+        """Return the cached appliance from the coordinator."""
+        return self.coordinator.data[self._appliance_id]
 
     @property
     def supported_features(self):
@@ -140,7 +144,7 @@ class PanasonicClimate(ClimateEntity):
     @property
     def available(self):
         """Return if the device is available."""
-        return True
+        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
 
     @property
     def temperature_unit(self):
@@ -184,12 +188,15 @@ class PanasonicClimate(ClimateEntity):
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
+        if ATTR_TEMPERATURE not in kwargs:
+            return
         temperature = int(kwargs.get(ATTR_TEMPERATURE))
         _LOGGER.debug(
             "async_set_temperature() temperature = %s", temperature)
-        if temperature is None:
-            return
-        await self._api.set_target_temperature(temperature)
+        try:
+            return await self._api.set_target_temperature(temperature)
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def preset_mode(self):
@@ -232,26 +239,39 @@ class PanasonicClimate(ClimateEntity):
 
     async def async_turn_on(self):
         """Turn device on."""
-        return await self._api.set_power('on')
+        try:
+            return await self._api.set_power('on')
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     async def async_turn_off(self):
         """Turn device off."""
-        return await self._api.set_power('off')
+        try:
+            return await self._api.set_power('off')
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     async def async_set_preset_mode(self, preset_mode):
         """Set preset mode."""
         _LOGGER.debug(
             "climate.async_set_preset_mode() mode = %s", preset_mode)
-        await self._api.set_preset_mode(preset_mode.lower())
+        try:
+            return await self._api.set_preset_mode(preset_mode.lower())
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set HVAC mode."""
         _LOGGER.debug(
             "climate.async_set_operation_mode() mode = %s", hvac_mode)
         if hvac_mode in HA_STATE_TO_PANA:
-            await self._api.set_operation_mode(HA_STATE_TO_PANA[hvac_mode])
+            command = HA_STATE_TO_PANA[hvac_mode]
         else:
-            await self._api.set_operation_mode(hvac_mode.lower())
+            command = hvac_mode.lower()
+        try:
+            return await self._api.set_operation_mode(command)
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def fan_mode(self):
@@ -261,7 +281,10 @@ class PanasonicClimate(ClimateEntity):
     async def async_set_fan_mode(self, fan_mode):
         """Set fan mode."""
         _LOGGER.debug("climate.async_set_fan_mode() fan_mode = %s", fan_mode)
-        await self._api.set_fan_mode(fan_mode.lower())
+        try:
+            return await self._api.set_fan_mode(fan_mode.lower())
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def fan_modes(self):
@@ -277,16 +300,15 @@ class PanasonicClimate(ClimateEntity):
 
     async def async_set_swing_mode(self, swing_mode):
         """Set new target temperature."""
-        await self._api.set_swing_mode(swing_mode.lower())
+        try:
+            return await self._api.set_swing_mode(swing_mode.lower())
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     @property
     def swing_modes(self):
         """List of available swing modes."""
         return list(map(str.title, self._api.get_swing_mode_list()))
-
-    async def async_update(self):
-        """Retrieve latest state."""
-        await self._api.async_update()
 
     @property
     def device_info(self):

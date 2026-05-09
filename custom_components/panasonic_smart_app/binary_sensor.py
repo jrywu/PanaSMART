@@ -1,11 +1,13 @@
-"""Support for Panasonic AC/ Dehumidifier binary sensors."""
+﻿"""Support for Panasonic AC/ Dehumidifier binary sensors."""
 import logging
 
 from homeassistant.const import (
     CONF_ICON, CONF_NAME, CONF_TYPE, CONF_DEVICE_CLASS)
 from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    DATA_COORDINATOR,
     DOMAIN,
     ATTR_TANK_FULL,
     BINARY_SENSOR_TANK_FULL,
@@ -24,30 +26,29 @@ async def async_setup_platform(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Panasonic climate binary sensors based on config_entry."""
-    #pana_api = hass.data[DOMAIN].get(entry.entry_id)
-    pana_api = hass.data[DOMAIN].get('api')
-    appliances = pana_api.get_all_appliances()
-
-    if appliances is not None:
-        for appliance in appliances:
-            device_type = appliance.get_device_type()
-            sensor_type = None
-            if device_type == 1: #AC
-                sensor_type = None  #No binary sensors for AC currently
-            elif device_type == 4: #Dehumidifier
-                sensor_type = BINARY_SENSOR_TYPES
-            if sensor_type is not None:
-                async_add_entities([
-                    PanasonicBinarySensor(appliance, sensor)
-                    for sensor in sensor_type])
+    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    entities = []
+    for appliance in coordinator.data.values():
+        device_type = appliance.get_device_type()
+        sensor_type = None
+        if device_type == 1: #AC
+            sensor_type = None  #No binary sensors for AC currently
+        elif device_type == 4: #Dehumidifier
+            sensor_type = BINARY_SENSOR_TYPES
+        if sensor_type is not None:
+            entities.extend([
+                PanasonicBinarySensor(coordinator, appliance, sensor)
+                for sensor in sensor_type])
+    async_add_entities(entities)
 
 
-class PanasonicBinarySensor(BinarySensorEntity):
+class PanasonicBinarySensor(CoordinatorEntity, BinarySensorEntity):
     """Representation of a Binary Sensor."""
 
-    def __init__(self, api, sensor_type, name=None)->None:
+    def __init__(self, coordinator, api, sensor_type, name=None)->None:
         """Initialize the binary sensor."""
-        self._api = api
+        super().__init__(coordinator)
+        self._appliance_id = api.get_id()
         self.device_type = api.get_device_type()
         if self.device_type == 1: #AC
             self._sensor = None
@@ -61,6 +62,16 @@ class PanasonicBinarySensor(BinarySensorEntity):
 
         _LOGGER.debug("panasonic_saa4.PanasonicBinarySensor._name=%s."
             ,self._name)
+
+    @property
+    def _api(self):
+        """Return the cached appliance from the coordinator."""
+        return self.coordinator.data[self._appliance_id]
+
+    @property
+    def available(self):
+        """Return if the device is available."""
+        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
 
     @property
     def is_on(self):
@@ -102,4 +113,3 @@ class PanasonicBinarySensor(BinarySensorEntity):
             "sw_version": "0.0",
             "via_device": (DOMAIN, str(self._api.get_gwid()))
         }
-

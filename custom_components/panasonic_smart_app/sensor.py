@@ -1,4 +1,4 @@
-"""Support for Panasonic AC sensors."""
+﻿"""Support for Panasonic AC sensors."""
 import logging
 
 from homeassistant.const import (
@@ -7,8 +7,10 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.util.unit_system import UnitSystem
 from homeassistant.components.climate.const import (
      ATTR_CURRENT_HUMIDITY)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    DATA_COORDINATOR,
     DOMAIN,
     ATTR_INSIDE_TEMPERATURE,
     ATTR_TARGET_TEMPERATURE,
@@ -34,30 +36,29 @@ async def async_setup_platform(
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Panasonic climate temperature sensors based on config_entry."""
-    #pana_api = hass.data[DOMAIN].get(entry.entry_id)
-    pana_api = hass.data[DOMAIN].get('api')
-    appliances = pana_api.get_all_appliances()
-
-    if appliances is not None:
-        for appliance in appliances:
-            device_type = appliance.get_device_type()
-            sensor_type = None
-            if device_type == 1: #AC
-                sensor_type = CLIMATE_SENSOR_TYPES
-            elif device_type == 4: #dehumidifier
-                sensor_type = DEHUMI_SENSOR_TYPES
-            if sensor_type is not None:
-                async_add_entities([
-                    PanasonicClimateSensor(appliance, sensor, hass.config.units)
-                    for sensor in sensor_type])
+    coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    entities = []
+    for appliance in coordinator.data.values():
+        device_type = appliance.get_device_type()
+        sensor_type = None
+        if device_type == 1: #AC
+            sensor_type = CLIMATE_SENSOR_TYPES
+        elif device_type == 4: #dehumidifier
+            sensor_type = DEHUMI_SENSOR_TYPES
+        if sensor_type is not None:
+            entities.extend([
+                PanasonicClimateSensor(coordinator, appliance, sensor, hass.config.units)
+                for sensor in sensor_type])
+    async_add_entities(entities)
 
 
-class PanasonicClimateSensor(Entity):
+class PanasonicClimateSensor(CoordinatorEntity, Entity):
     """Representation of a Sensor."""
 
-    def __init__(self, api, monitored_state, units:UnitSystem, name=None)->None:
+    def __init__(self, coordinator, api, monitored_state, units:UnitSystem, name=None)->None:
         """Initialize the sensor."""
-        self._api = api
+        super().__init__(coordinator)
+        self._appliance_id = api.get_id()
         self.device_type = api.get_device_type()
         if self.device_type == 1: #AC
             self._sensor = CLIMATE_SENSOR_TYPES.get(monitored_state)
@@ -78,6 +79,16 @@ class PanasonicClimateSensor(Entity):
             self._unit_of_measurement = '%'
         _LOGGER.debug("panasonic_saa4.PanasonicClimateSensor._name=%s."
             ,self._name)
+
+    @property
+    def _api(self):
+        """Return the cached appliance from the coordinator."""
+        return self.coordinator.data[self._appliance_id]
+
+    @property
+    def available(self):
+        """Return if the device is available."""
+        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
 
     def get(self, key):
         """Retrieve device settings from API library cache."""
