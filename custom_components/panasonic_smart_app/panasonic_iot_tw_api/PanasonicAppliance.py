@@ -7,28 +7,6 @@ _LOGGER = logging.getLogger(__name__)
 
 ASYNC_UPDATE_INTERVAL = 300
 
-DEHUMI_PRESET_MODE_BY_VALUE = {
-    "default": {
-        0: "continuous",
-        1: "auto",
-        2: "clean",
-        3: "fan",
-        4: "clothes",
-        5: "cloeth dry",
-        6: "fixed humidity",
-    },
-    "NNW-L": {
-        0: "continuous",
-        1: "mold standby",
-        3: "fan",
-        4: "clothes",
-        6: "fixed humidity",
-        9: "smart energy",
-        10: "quick dry",
-        11: "silent dry",
-    },
-}
-
 class PanasonicAppliance:
     """Panasonic IoT appliance class."""
 
@@ -96,10 +74,6 @@ class PanasonicAppliance:
 
         self.setup_command_list(device)
 
-    def _get_dehumi_preset_mode_name(self, value, fallback):
-        mode_map = DEHUMI_PRESET_MODE_BY_VALUE.get(self.model_type, DEHUMI_PRESET_MODE_BY_VALUE["default"])
-        return mode_map.get(value, fallback)
-
     def setup_command_list(self, device):
         """Setup appliance parameters according to the command list in device object."""
         for command in device['CommandList']['list']:
@@ -114,7 +88,7 @@ class PanasonicAppliance:
                     self.operation_mode_list.append('dry')
                     for mode in command['Parameters']:
                         value = int(mode[1])
-                        preset_mode = self._get_dehumi_preset_mode_name(value, mode[0])
+                        preset_mode = mode[0]
                         self.preset_mode_by_value[value] = preset_mode
                         self.preset_value_by_mode[preset_mode] = value
                         self.preset_mode_list.append(preset_mode)
@@ -679,7 +653,9 @@ class PanasonicAppliance:
         if not command == self.preset_mode:
             value = self.preset_value_by_mode.get(command)
             if value is None:
-                _LOGGER.error("%s set_preset_mode() unsupported mode: %s", self.name, command)
+                _LOGGER.error(
+                    "%s set_preset_mode() unsupported mode: %s; supported=%s",
+                    self.name, command, self.preset_mode_list)
                 return self.preset_mode
             await self.core.device_control(self.device, 1, value)
             await self.async_update_operation_mode()
@@ -698,12 +674,17 @@ class PanasonicAppliance:
                 if not self.is_on():
                     await self.core.device_control(self.device, 0, 1)
                 if self.type == 1: #AC
+                    if command not in self.ac_operation_mode_list:
+                        _LOGGER.error(
+                            "%s set_operation_mode() unsupported mode: %s; supported=%s",
+                            self.name, command, self.operation_mode_list)
+                        return self.operation_mode
                     await self.core.device_control(self.device, 1,
                         self.ac_operation_mode_list.index(command))
                 elif self.type == 4: #dehumidifier
                     if not self.is_on():
                             await self.core.device_control(self.device, 0, 1)
-                    value = self.preset_value_by_mode.get('fixed humidity', 6)
+                    value = self.preset_value_by_mode.get('濕度設定', 6)
                     await self.core.device_control(self.device, 1, value) #dry to target humidity
                     #await self.api.device_control(self. device, 1,  self.dehumi_operation_mode_list.index(command))
             await self.async_update_operation_mode()
@@ -754,18 +735,26 @@ class PanasonicAppliance:
 
     async def set_fan_mode(self, mode):
         """Set fan mdoe."""
+        mode = str(mode).strip()
         await self.async_update_fan_swing_mode()
         if not mode == self.fan_mode:
             if self.type == 1: #AC
                 if mode.lower() == 'auto' or mode == '自動':
                     level = 0
                 else:
+                    if mode not in self.fan_mode_list:
+                        _LOGGER.error(
+                            "%s set_fan_mode() unsupported mode: %s; supported=%s",
+                            self.name, mode, self.fan_mode_list)
+                        return self.fan_mode
                     level = int(mode)
                 await self.core.device_control(self.device, 2, level)
             elif self.type == 4: #dehumidifer
                 value = self.fan_value_by_mode.get(mode)
                 if value is None:
-                    _LOGGER.error("%s set_fan_mode() unsupported mode: %s", self.name, mode)
+                    _LOGGER.error(
+                        "%s set_fan_mode() unsupported mode: %s; supported=%s",
+                        self.name, mode, self.fan_mode_list)
                     return self.fan_mode
                 await self.core.device_control(self.device, 0xe, value)
             await self.async_update_fan_swing_mode()
@@ -806,18 +795,26 @@ class PanasonicAppliance:
 
     async def set_swing_mode(self, mode):
         """Set swing mode."""
+        mode = str(mode).strip()
         await self.async_update_fan_swing_mode()
         if not mode == self.swing_mode:
             if self.type == 1: #AC
                 if mode == 'auto':
                     value = 0
                 else:
+                    if mode not in self.swing_mode_list:
+                        _LOGGER.error(
+                            "%s set_swing_mode() unsupported mode: %s; supported=%s",
+                            self.name, mode, self.swing_mode_list)
+                        return self.swing_mode
                     value = int(mode)
                 await self.core.device_control(self.device, 0xf, value)
             elif self.type == 4: #dehumidifier
                 value = self.swing_value_by_mode.get(mode)
                 if value is None:
-                    _LOGGER.error("%s set_swing_mode() unsupported mode: %s", self.name, mode)
+                    _LOGGER.error(
+                        "%s set_swing_mode() unsupported mode: %s; supported=%s",
+                        self.name, mode, self.swing_mode_list)
                     return self.swing_mode
                 await self.core.device_control(self.device, 9, value)
             await self.async_update_fan_swing_mode()

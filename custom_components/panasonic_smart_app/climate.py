@@ -33,6 +33,30 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_ha_string(value):
+    """Normalize HA service/display strings without changing non-ASCII labels."""
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = value.value
+    value = str(value).strip()
+    if value.isascii():
+        return value.lower().replace("_", " ")
+    return value
+
+
+def _resolve_supported_mode(value, supported_modes):
+    """Return a supported canonical mode from an HA value."""
+    if supported_modes is None:
+        return None
+    if value in supported_modes:
+        return value
+    normalized = _normalize_ha_string(value)
+    if normalized in supported_modes:
+        return normalized
+    return None
+
+
 async def async_setup_platform(
         hass, config, async_add_entities, discovery_info=None):
     """Old way of setting up the platform.
@@ -206,7 +230,7 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
         """Return current preset mode."""
         mode = self._api.get_preset_mode()
         _LOGGER.debug("climate.preset_ mode() = %s", mode)
-        return mode.title()
+        return mode
 
     @property
     def hvac_mode(self):
@@ -215,17 +239,12 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
         _LOGGER.debug("climate.current_mode() = %s", mode)
         if mode in PANA_TO_HA_STATE:
             return PANA_TO_HA_STATE[mode]
-        else:
-            return mode.title()
+        return None
 
     @property
     def preset_modes(self):
         """Return the list of available preset modes."""
-        pana_list = self._api.get_preset_mode_list()
-        ha_list = []
-        for mode in pana_list:
-                ha_list.append(mode.title())
-        return ha_list
+        return self._api.get_preset_mode_list()
 
     @property
     def hvac_modes(self):
@@ -235,8 +254,6 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
         for mode in pana_list:
             if mode in PANA_TO_HA_STATE:
                 ha_list.append(PANA_TO_HA_STATE.get(mode))
-            else:
-                ha_list.append(mode.title())
         return ha_list
 
 
@@ -258,8 +275,19 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
         """Set preset mode."""
         _LOGGER.debug(
             "climate.async_set_preset_mode() mode = %s", preset_mode)
+        command = _resolve_supported_mode(
+            preset_mode, self._api.get_preset_mode_list())
+        if command is None:
+            _LOGGER.error(
+                "%s async_set_preset_mode() unsupported mode: requested=%s normalized=%s supported=%s",
+                self._api.get_name(),
+                preset_mode,
+                _normalize_ha_string(preset_mode),
+                self._api.get_preset_mode_list(),
+            )
+            return
         try:
-            return await self._api.set_preset_mode(preset_mode.lower())
+            return await self._api.set_preset_mode(command)
         finally:
             await self.coordinator.async_request_forced_refresh()
 
@@ -267,10 +295,20 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
         """Set HVAC mode."""
         _LOGGER.debug(
             "climate.async_set_operation_mode() mode = %s", hvac_mode)
-        if hvac_mode in HA_STATE_TO_PANA:
-            command = HA_STATE_TO_PANA[hvac_mode]
-        else:
-            command = hvac_mode.lower()
+        key = hvac_mode.value if hasattr(hvac_mode, "value") else hvac_mode
+        command = HA_STATE_TO_PANA.get(key)
+        if command is None:
+            normalized = _normalize_ha_string(key)
+            command = HA_STATE_TO_PANA.get(normalized)
+        if command not in self._api.get_operation_mode_list():
+            _LOGGER.error(
+                "%s async_set_hvac_mode() unsupported mode: requested=%s normalized=%s supported=%s",
+                self._api.get_name(),
+                hvac_mode,
+                command,
+                self._api.get_operation_mode_list(),
+            )
+            return
         try:
             return await self._api.set_operation_mode(command)
         finally:
@@ -279,39 +317,60 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
     @property
     def fan_mode(self):
         """Return the fan setting."""
-        return self._api.get_fan_mode().title()
+        return self._api.get_fan_mode()
 
     async def async_set_fan_mode(self, fan_mode):
         """Set fan mode."""
         _LOGGER.debug("climate.async_set_fan_mode() fan_mode = %s", fan_mode)
+        command = _resolve_supported_mode(fan_mode, self._api.get_fan_mode_list())
+        if command is None:
+            _LOGGER.error(
+                "%s async_set_fan_mode() unsupported mode: requested=%s normalized=%s supported=%s",
+                self._api.get_name(),
+                fan_mode,
+                _normalize_ha_string(fan_mode),
+                self._api.get_fan_mode_list(),
+            )
+            return
         try:
-            return await self._api.set_fan_mode(fan_mode.lower())
+            return await self._api.set_fan_mode(command)
         finally:
             await self.coordinator.async_request_forced_refresh()
 
     @property
     def fan_modes(self):
         """List of available fan modes."""
-        return list(map(str.title, self._api.get_fan_mode_list()))
+        return self._api.get_fan_mode_list()
 
     @property
     def swing_mode(self):
         """Return the fan setting."""
-        mode = self._api.get_swing_mode().title()
+        mode = self._api.get_swing_mode()
         _LOGGER.debug("climate.current_swing_mode() swing_mode = %s", mode)
         return mode
 
     async def async_set_swing_mode(self, swing_mode):
         """Set new target temperature."""
+        command = _resolve_supported_mode(
+            swing_mode, self._api.get_swing_mode_list())
+        if command is None:
+            _LOGGER.error(
+                "%s async_set_swing_mode() unsupported mode: requested=%s normalized=%s supported=%s",
+                self._api.get_name(),
+                swing_mode,
+                _normalize_ha_string(swing_mode),
+                self._api.get_swing_mode_list(),
+            )
+            return
         try:
-            return await self._api.set_swing_mode(swing_mode.lower())
+            return await self._api.set_swing_mode(command)
         finally:
             await self.coordinator.async_request_forced_refresh()
 
     @property
     def swing_modes(self):
         """List of available swing modes."""
-        return list(map(str.title, self._api.get_swing_mode_list()))
+        return self._api.get_swing_mode_list()
 
     @property
     def device_info(self):

@@ -15,6 +15,30 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_ha_string(value):
+    """Normalize HA service/display strings without changing non-ASCII labels."""
+    if value is None:
+        return None
+    if hasattr(value, "value"):
+        value = value.value
+    value = str(value).strip()
+    if value.isascii():
+        return value.lower().replace("_", " ")
+    return value
+
+
+def _resolve_supported_mode(value, supported_modes):
+    """Return a supported canonical mode from an HA value."""
+    if supported_modes is None:
+        return None
+    if value in supported_modes:
+        return value
+    normalized = _normalize_ha_string(value)
+    if normalized in supported_modes:
+        return normalized
+    return None
+
+
 async def async_setup_platform(
         hass, config, async_add_entities, discovery_info=None):
     """Old way of setting up the platform.
@@ -114,17 +138,13 @@ class PanasonicDehumidifier(CoordinatorEntity, HumidifierEntity):
         """Return current preset mode."""
         mode = self._api.get_preset_mode()
         _LOGGER.debug("dehumidifier.preset_ mode() = %s", mode)
-        return mode.title()
+        return mode
 
 
     @property
     def available_modes(self):
         """Return the list of available preset modes."""
-        pana_list = self._api.get_preset_mode_list()
-        ha_list = []
-        for mode in pana_list:
-                ha_list.append(mode.title())
-        return ha_list
+        return self._api.get_preset_mode_list()
 
 
     async def async_turn_on(self):
@@ -145,8 +165,18 @@ class PanasonicDehumidifier(CoordinatorEntity, HumidifierEntity):
         """Set preset mode."""
         _LOGGER.debug(
             "humidifier.async_set_preset_mode() mode = %s", mode)
+        command = _resolve_supported_mode(mode, self._api.get_preset_mode_list())
+        if command is None:
+            _LOGGER.error(
+                "%s async_set_mode() unsupported mode: requested=%s normalized=%s supported=%s",
+                self._api.get_name(),
+                mode,
+                _normalize_ha_string(mode),
+                self._api.get_preset_mode_list(),
+            )
+            return
         try:
-            return await self._api.set_preset_mode(mode.lower())
+            return await self._api.set_preset_mode(command)
         finally:
             await self.coordinator.async_request_forced_refresh()
 

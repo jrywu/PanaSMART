@@ -40,6 +40,14 @@ HA_STATE_TO_PANA= {
     HVACMode.HEAT: 'heat',
     HVACMode.AUTO: 'auto',
     HVACMode.OFF: 'off',
+    'dry': 'dry',
+    'cool': 'cool',
+    'fan': 'fan',
+    'fan_only': 'fan',
+    'fan only': 'fan',
+    'heat': 'heat',
+    'auto': 'auto',
+    'off': 'off',
 }
 
 PANA_TO_HA_STATE = {
