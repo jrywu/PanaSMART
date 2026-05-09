@@ -100,6 +100,6 @@ class PanasonicBinarySensor(BinarySensorEntity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": self._api.get_gwid(),
+            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }
 

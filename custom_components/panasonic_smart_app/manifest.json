@@ -1,9 +1,10 @@
 {
-  "domain": "panasonic_ac_saa4",
+  "domain": "panasonic_smart_app",
   "name": "Panasonic SMART",
    "version": "1.0",
   "config_flow": true,
   "documentation": "",
+  "iot_class": "cloud_polling",
   "requirements": [],
   "dependencies": [],
   "codeowners": [

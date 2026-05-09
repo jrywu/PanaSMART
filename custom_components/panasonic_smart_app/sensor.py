@@ -1,4 +1,4 @@
-"""Support for Panasonic SMART AC/dehumidifier sensors."""
+"""Support for Panasonic AC sensors."""
 import logging
 
 from homeassistant.const import (
@@ -16,8 +16,8 @@ from .const import (
     ATTR_TARGET_HUMIDITY,
     SENSOR_TYPE_TEMPERATURE,
     SENSOR_TYPE_HUMIDITY,
-    TEMPERATURE_SENSOR_TYPES,
-    HUMIDITY_SENSOR_TYPES)
+    CLIMATE_SENSOR_TYPES,
+    DEHUMI_SENSOR_TYPES)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,9 +43,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
             device_type = appliance.get_device_type()
             sensor_type = None
             if device_type == 1: #AC
-                sensor_type = TEMPERATURE_SENSOR_TYPES
+                sensor_type = CLIMATE_SENSOR_TYPES
             elif device_type == 4: #dehumidifier
-                sensor_type = HUMIDITY_SENSOR_TYPES
+                sensor_type = DEHUMI_SENSOR_TYPES
             if sensor_type is not None:
                 async_add_entities([
                     PanasonicClimateSensor(appliance, sensor, hass.config.units)
@@ -60,9 +60,9 @@ class PanasonicClimateSensor(Entity):
         self._api = api
         self.device_type = api.get_device_type()
         if self.device_type == 1: #AC
-            self._sensor = TEMPERATURE_SENSOR_TYPES.get(monitored_state)
+            self._sensor = CLIMATE_SENSOR_TYPES.get(monitored_state)
         elif self.device_type == 4: #AC
-            self._sensor = HUMIDITY_SENSOR_TYPES.get(monitored_state)
+            self._sensor = DEHUMI_SENSOR_TYPES.get(monitored_state)
         if name is None:
             name = self._api.get_name()
         self._name = "{} {}".format(name, self._sensor[CONF_NAME])
@@ -145,5 +145,5 @@ class PanasonicClimateSensor(Entity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": self._api.get_gwid(),
+            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }

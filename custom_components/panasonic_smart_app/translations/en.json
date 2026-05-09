@@ -3,8 +3,8 @@
         "title": "Panasonic SMART",
         "step": {
             "user": {
-                "title": "Configure Panasonic SMART",
-                "description": "Enter username and password registered in Panasonic SMART app.",
+                "title": "Configure Panasonic AC",
+                "description": "Enter username and password regsited in Panasonic SMART app.",
                 "data": {
                     "username": "Username",
                     "password": "Passowrd",

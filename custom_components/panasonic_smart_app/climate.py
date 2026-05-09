@@ -3,20 +3,12 @@ import logging
 
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
 from homeassistant.components.climate.const import (
-    SUPPORT_SWING_MODE,
-    SUPPORT_FAN_MODE,
-    SUPPORT_TARGET_TEMPERATURE,
-    SUPPORT_TARGET_HUMIDITY,
-    SUPPORT_PRESET_MODE,
-    ATTR_CURRENT_HUMIDITY,
+    ClimateEntityFeature,
     ATTR_CURRENT_TEMPERATURE,
     ATTR_FAN_MODES,
     ATTR_FAN_MODE,
     ATTR_PRESET_MODES,
     ATTR_PRESET_MODE,
-    ATTR_HUMIDITY,
-    ATTR_MAX_HUMIDITY,
-    ATTR_MIN_HUMIDITY,
     ATTR_MAX_TEMP,
     ATTR_MIN_TEMP,
     ATTR_HVAC_MODES,
@@ -28,8 +20,7 @@ from homeassistant.components.climate.const import (
     ATTR_TARGET_TEMP_STEP,
     )
 from homeassistant.const import (
-    ATTR_TEMPERATURE, TEMP_CELSIUS, PRECISION_WHOLE)
-import homeassistant.helpers.config_validation as cv
+    ATTR_TEMPERATURE, UnitOfTemperature, PRECISION_WHOLE)
 from homeassistant.helpers.temperature import display_temp as show_temp
 from .const import (
     DOMAIN,
@@ -58,7 +49,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     appliances = pana_api.get_all_appliances()
     if appliances is not None:
         for appliance in appliances:
-            async_add_entities([PanasonicClimate(appliance)])
+            device_type = appliance.get_device_type()
+            if device_type == 1: #AC
+                async_add_entities([PanasonicClimate(appliance)])
+
 
 
 class PanasonicClimate(ClimateEntity):
@@ -67,16 +61,11 @@ class PanasonicClimate(ClimateEntity):
     def __init__(self, api):
         """Initialize the climate device."""
         self._api = api
-        self._supported_features =  SUPPORT_FAN_MODE \
-            | SUPPORT_SWING_MODE
         self.device_type = self._api.get_device_type()
-        if  self.device_type == 1: #AC
-            self._supported_features |= SUPPORT_TARGET_TEMPERATURE
-        elif self.device_type == 4: #Dehumidifier
-            self._supported_features |= \
-                (SUPPORT_TARGET_HUMIDITY | SUPPORT_PRESET_MODE)
-        else: # Other appliance type not yet supported
-            return None
+        self._supported_features = ClimateEntityFeature.FAN_MODE \
+            | ClimateEntityFeature.SWING_MODE | ClimateEntityFeature.TARGET_TEMPERATURE \
+            | ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+        self._enable_turn_on_off_backwards_compatibility = False
 
 
     @property
@@ -88,27 +77,23 @@ class PanasonicClimate(ClimateEntity):
     def state_attributes(self):
         """Return the optional state attributes."""
         data = {
-            ATTR_FAN_MODE:  self.fan_mode,
+            ATTR_FAN_MODE: self.fan_mode,
             ATTR_SWING_MODE: self.swing_mode,
             }
 
-        if self.device_type == 1:#AC
-            data[ATTR_CURRENT_TEMPERATURE] = show_temp(
-                    self.hass,
-                    self.current_temperature,
-                    self.temperature_unit,
-                    self.precision,
-                    )
-            data[ATTR_TEMPERATURE] = show_temp(
-                    self.hass,
-                    self.target_temperature,
-                    self.temperature_unit,
-                    self.precision,
-                    )
-        if self.device_type == 4:#Dehumidifer
-            data[ATTR_CURRENT_HUMIDITY] = self.current_humidity
-            data[ATTR_HUMIDITY] = self.target_humidity
-            data[ATTR_PRESET_MODE] = self.preset_mode
+        data[ATTR_CURRENT_TEMPERATURE] = show_temp(
+                self.hass,
+                self.current_temperature,
+                self.temperature_unit,
+                self.precision,
+                )
+        data[ATTR_TEMPERATURE] = show_temp(
+                self.hass,
+                self.target_temperature,
+                self.temperature_unit,
+                self.precision,
+                )
+
         return data
 
     @property
@@ -121,24 +106,19 @@ class PanasonicClimate(ClimateEntity):
                 ATTR_SWING_MODES: self.swing_modes,
                 }
 
-        if self.device_type == 1:#AC
-            data[ATTR_MAX_TEMP] = show_temp(
-                    self.hass,
-                    self.max_temp,
-                    self.temperature_unit,
-                    self.precision,
-                    )
-            data[ATTR_MIN_TEMP] = show_temp(
-                    self.hass,
-                    self.min_temp,
-                    self.temperature_unit,
-                    self.precision,
-                    )
-            data[ATTR_TARGET_TEMP_STEP] = self.target_temperature_step
-        if self.device_type == 4:#Dehumidifer
-            data[ATTR_MIN_HUMIDITY] = self.min_humidity
-            data[ATTR_MAX_HUMIDITY] = self.max_humidity
-            data[ATTR_PRESET_MODES] = self.preset_modes
+        data[ATTR_MAX_TEMP] = show_temp(
+                self.hass,
+                self.max_temp,
+                self.temperature_unit,
+                self.precision,
+                )
+        data[ATTR_MIN_TEMP] = show_temp(
+                self.hass,
+                self.min_temp,
+                self.temperature_unit,
+                self.precision,
+                )
+        data[ATTR_TARGET_TEMP_STEP] = self.target_temperature_step
 
         return data
 
@@ -159,43 +139,24 @@ class PanasonicClimate(ClimateEntity):
 
     @property
     def available(self):
+        """Return if the device is available."""
         return True
 
     @property
     def temperature_unit(self):
         """Return the unit of measurement which this thermostat uses."""
-        return TEMP_CELSIUS
+        return UnitOfTemperature.CELSIUS
 
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        if self.device_type == 1:#AC
-            return self._api.get_inside_temperature()
-        #elif self.device_type == 4:#Dehumidifer
-        #    return 0 # self._api.get_current_humidity()
-        return None
+        return self._api.get_inside_temperature()
 
     @property
     def target_temperature(self):
         """Return the temperature we try to reach."""
         if self.device_type == 1:#AC
             return self._api.get_target_temperature()
-        else:
-            return None
-
-    @property
-    def current_humidity(self):
-        """Return the current humidity."""
-        if self.device_type == 4:#Dehumidifier
-            return self._api.get_current_humidity()
-        else:
-            return None
-
-    @property
-    def target_humidity(self):
-        """Return the humidity we try to reach."""
-        if self.device_type == 4:#Dehumidifier
-            return self._api.get_target_humidity()
         else:
             return None
 
@@ -220,15 +181,6 @@ class PanasonicClimate(ClimateEntity):
         else:
             return 0
 
-    @property
-    def min_humidity(self):
-        """Return the minimum humidity."""
-        return self._api.get_humidity_min()
-
-    @property
-    def max_humidity(self):
-        """Return the maximum humidity."""
-        return self._api.get_humidity_max()
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
@@ -238,12 +190,6 @@ class PanasonicClimate(ClimateEntity):
         if temperature is None:
             return
         await self._api.set_target_temperature(temperature)
-
-    async def async_set_humidity(self, humidity):
-        """Set new target humidity."""
-        _LOGGER.debug(
-            "async_set_humidity() humidity = %s", humidity)
-        await self._api.set_target_humidity(humidity)
 
     @property
     def preset_mode(self):
@@ -287,6 +233,7 @@ class PanasonicClimate(ClimateEntity):
     async def async_turn_on(self):
         """Turn device on."""
         return await self._api.set_power('on')
+
     async def async_turn_off(self):
         """Turn device off."""
         return await self._api.set_power('off')
@@ -350,6 +297,5 @@ class PanasonicClimate(ClimateEntity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": self._api.get_gwid(),
+            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }
-

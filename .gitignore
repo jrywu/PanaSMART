@@ -1,2 +1,6 @@
 
 .DS_Store
+/custom_components/panasonic_smart_app/__pycache__
+/custom_components/panasonic_smart_app/panasonic_iot_tw_api/__pycache__
+custom_components/panasonic_smart_app/my_pypanasonic_ac_saa4.py
+/.Codex
