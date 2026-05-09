@@ -1,7 +1,8 @@
-"""Python example to control Panasonic smart appliances using SAAnet 4 standard."""
+﻿"""Python example to control Panasonic smart appliances using SAAnet 4 standard."""
 
 # import argparse
 import asyncio
+import datetime
 from aiohttp import ClientSession
 
 from panasonic_iot_tw_api import panasonic_iot_tw_api
@@ -39,7 +40,11 @@ async def my_async_function():
     #print('Target Temperature:', appliance.get_target_temperature())
     #print('Outside Temperature:', appliance.get_outside_temperature())
     #print('Inside Temperature:', appliance.get_inside_temperature())
-    info = await appliance.get_power_log(0,12)
+    info = await appliance.get_power_log(
+        unit='hour',
+        from_date=datetime.date.today(),
+        max_num=24,
+    )
     print('Power:', info)
     await session.close()
 

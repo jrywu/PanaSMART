@@ -30,7 +30,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     async_add_entities([
         PanasonicDehumidifier(coordinator, appliance)
-        for appliance in coordinator.data.values()
+        for appliance in coordinator.data["appliances"].values()
         if appliance.get_device_type() == 4
     ])
 
@@ -48,7 +48,7 @@ class PanasonicDehumidifier(CoordinatorEntity, HumidifierEntity):
     @property
     def _api(self):
         """Return the cached appliance from the coordinator."""
-        return self.coordinator.data[self._appliance_id]
+        return self.coordinator.data["appliances"][self._appliance_id]
 
     @property
     def supported_features(self):
@@ -69,7 +69,10 @@ class PanasonicDehumidifier(CoordinatorEntity, HumidifierEntity):
     @property
     def available(self):
         """Return if the device is available."""
-        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
+        return (
+            self.coordinator.last_update_success
+            and self._appliance_id in self.coordinator.data["appliances"]
+        )
 
 
     @property

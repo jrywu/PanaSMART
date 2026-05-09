@@ -77,6 +77,20 @@ class PanasonicAppliance:
         self.tank_full = False
         self.humidity = 0
         self.target_humidity = 60
+        self.energy_kwh = None
+        self.previous_current_hour_kwh = None
+        self.power_log_current_hour_kwh = None
+        self.current_hour_delta_kwh = 0
+        self.current_hour_index = None
+        self.calibrated_hour_keys = set()
+        self.pending_calibration_hour_keys = set()
+        self.calibrated_day_keys = set()
+        self.pending_day_calibration_keys = set()
+        self.power_log_date = None
+        self.power_log_unit = None
+        self.power_log_raw = None
+        self.power_log_kwh_buckets = None
+        self.power_log_last_update = None
         self.ac_operation_mode_list = \
             ['cool', 'dry', 'fan', 'auto', 'heat']
 
@@ -248,9 +262,187 @@ class PanasonicAppliance:
         """Return the appliance nickname."""
         return self.name
 
-    async def get_power_log(self, year_back=0, months=12):
-        """Return hourly power of of the appliance."""
-        return await self.core.get_power_log(self.device, year_back, months)
+    async def get_power_log(self, unit='hour', from_date=None, max_num=24):
+        """Return Panasonic power log response for this appliance area."""
+        return await self.core.get_power_log(self, unit, from_date, max_num)
+
+    def _parse_power_log_kwh(self, response_json, update_raw=True):
+        """Return matching area kWh buckets from a Panasonic power-log response."""
+        if not isinstance(response_json, dict):
+            return None
+        if response_json.get('state') != 'success' and response_json.get('State') != 'success':
+            return None
+        for area in response_json.get('Areas', []):
+            if str(area.get('area_id')) != str(self.area_id):
+                continue
+            kwh = area.get('kwh')
+            if not isinstance(kwh, list):
+                return None
+            try:
+                buckets = [float(value) for value in kwh]
+            except (TypeError, ValueError):
+                return None
+            if update_raw:
+                self.power_log_raw = area
+            return buckets
+        return None
+
+    async def async_update_power_log(
+            self, unit='hour', from_date=None, max_num=24):
+        """Update cached energy meter data from Panasonic power-log buckets."""
+        now = datetime.datetime.now()
+        if from_date is None:
+            from_date = now.date()
+        response_json = await self.get_power_log(unit, from_date, max_num)
+        buckets = self._parse_power_log_kwh(response_json)
+        if buckets is None:
+            _LOGGER.warning("%s async_update_power_log() failed to parse response.", self.name)
+            return False
+        if unit != 'hour':
+            self.power_log_unit = unit
+            self.power_log_kwh_buckets = buckets
+            self.power_log_last_update = now
+            return True
+        if now.hour >= len(buckets):
+            _LOGGER.warning(
+                "%s async_update_power_log() missing current hour bucket %s.",
+                self.name, now.hour)
+            return False
+
+        date_key = now.date().isoformat()
+        current_hour_kwh = buckets[now.hour]
+        if self.energy_kwh is None:
+            self.energy_kwh = 0
+        if self.power_log_date != date_key:
+            self.previous_current_hour_kwh = None
+            self.power_log_current_hour_kwh = None
+            self.current_hour_delta_kwh = 0
+            self.current_hour_index = None
+            self.pending_calibration_hour_keys.clear()
+            self.power_log_date = date_key
+
+        if self.current_hour_index is None:
+            self.current_hour_index = now.hour
+            self.previous_current_hour_kwh = current_hour_kwh
+            self.current_hour_delta_kwh = 0
+        elif self.current_hour_index != now.hour:
+            completed_hour = now.replace(
+                minute=0, second=0, microsecond=0) - datetime.timedelta(hours=1)
+            completed_hour_key = completed_hour.strftime('%Y-%m-%dT%H')
+            if completed_hour.date().isoformat() == self.power_log_date:
+                self.pending_calibration_hour_keys.add(completed_hour_key)
+            self.current_hour_index = now.hour
+            self.previous_current_hour_kwh = current_hour_kwh
+            self.current_hour_delta_kwh = 0
+        else:
+            delta_kwh = current_hour_kwh - self.previous_current_hour_kwh
+            if delta_kwh > 0:
+                self.energy_kwh += delta_kwh
+                self.current_hour_delta_kwh += delta_kwh
+            self.previous_current_hour_kwh = current_hour_kwh
+
+        completed_hour = now.replace(
+            minute=0, second=0, microsecond=0) - datetime.timedelta(hours=1)
+        completed_hour_key = completed_hour.strftime('%Y-%m-%dT%H')
+        if (now.minute >= 5
+                and completed_hour.date().isoformat() == self.power_log_date
+                and completed_hour_key not in self.calibrated_hour_keys):
+            self.pending_calibration_hour_keys.add(completed_hour_key)
+
+        self.power_log_current_hour_kwh = current_hour_kwh
+        self.power_log_unit = unit
+        self.power_log_kwh_buckets = buckets
+        self.power_log_last_update = now
+        return True
+
+    def get_energy_kwh(self):
+        """Return cached Home Assistant energy meter value in kWh."""
+        return self.energy_kwh
+
+    def get_power_log_delta_kwh(self):
+        """Return current-hour kWh delta accumulated from power-log polling."""
+        return self.current_hour_delta_kwh
+
+    def get_power_log_last_update(self):
+        """Return the last successful power-log update time."""
+        return self.power_log_last_update
+
+    def get_power_log_current_hour_kwh(self):
+        """Return Panasonic's current hour bucket value."""
+        return self.power_log_current_hour_kwh
+
+    def get_pending_power_log_calibrations(self):
+        """Return pending completed-hour calibration keys."""
+        return list(self.pending_calibration_hour_keys)
+
+    def get_completed_hour_power_log_kwh(self, completed_hour_key):
+        """Return Panasonic finalized kWh for a completed hour key."""
+        if self.power_log_kwh_buckets is None:
+            return None
+        try:
+            completed_hour = datetime.datetime.strptime(
+                completed_hour_key, '%Y-%m-%dT%H')
+        except ValueError:
+            return None
+        if completed_hour.date().isoformat() != self.power_log_date:
+            return None
+        if completed_hour.hour >= len(self.power_log_kwh_buckets):
+            return None
+        return self.power_log_kwh_buckets[completed_hour.hour]
+
+    def apply_power_log_calibration(self, completed_hour_key, missing_kwh):
+        """Apply one completed-hour calibration correction."""
+        if missing_kwh > 0:
+            self.energy_kwh += missing_kwh
+        self.calibrated_hour_keys.add(completed_hour_key)
+        self.pending_calibration_hour_keys.discard(completed_hour_key)
+
+    def queue_completed_day_calibration(self, now=None):
+        """Queue yesterday for daily calibration after midnight settling time."""
+        if now is None:
+            now = datetime.datetime.now()
+        if now.hour != 0 or now.minute < 5:
+            return
+        completed_day = now.date() - datetime.timedelta(days=1)
+        completed_day_key = completed_day.isoformat()
+        if completed_day_key not in self.calibrated_day_keys:
+            self.pending_day_calibration_keys.add(completed_day_key)
+
+    def get_pending_power_log_day_calibrations(self):
+        """Return pending completed-day calibration keys."""
+        return list(self.pending_day_calibration_keys)
+
+    async def get_completed_day_power_log_kwh(self, completed_day_key):
+        """Return Panasonic finalized kWh for a completed day key."""
+        try:
+            completed_day = datetime.datetime.strptime(
+                completed_day_key, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+        response_json = await self.get_power_log(
+            unit='day',
+            from_date=completed_day,
+            max_num=1,
+        )
+        buckets = self._parse_power_log_kwh(response_json, update_raw=False)
+        if buckets is None:
+            response_json = await self.get_power_log(
+                unit='day',
+                from_date=completed_day,
+                max_num=30,
+            )
+            buckets = self._parse_power_log_kwh(response_json, update_raw=False)
+        if not buckets:
+            return None
+        return buckets[0]
+
+    def apply_power_log_day_calibration(self, completed_day_key, missing_kwh):
+        """Apply one completed-day calibration correction."""
+        if missing_kwh > 0:
+            self.energy_kwh += missing_kwh
+        self.calibrated_day_keys.add(completed_day_key)
+        self.pending_day_calibration_keys.discard(completed_day_key)
 
     async def async_update(self, force=False):
         """Async update appliance status.
@@ -631,11 +823,3 @@ class PanasonicAppliance:
             await self.async_update_fan_swing_mode()
         return self.swing_mode
     
-    async def get_power_log(self, year_back=0, months=12):
-        """Return power log for the appliance."""
-        response_json = await self.core.get_power_log(year_back, months)
-        if response_json is not None and isinstance(response_json, dict):
-            for result in response_json.get('GwList', []):
-                if result.get('GwID') == self.gwid:
-                    return result
-        return None

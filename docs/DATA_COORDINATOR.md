@@ -36,7 +36,8 @@ References:
 ## Polling Cadence
 
 - Use `STATUS_UPDATE_INTERVAL = timedelta(minutes=5)` for normal device status.
-- Use a separate `POWER_LOG_UPDATE_INTERVAL = timedelta(minutes=5)` only if power-log polling is implemented as a separate coordinator later.
+- Power-log polling should run in the same coordinator workflow as normal status polling.
+- Each 5-minute coordinator refresh should update both normal appliance status and power-log data.
 - Keep `ASYNC_UPDATE_INTERVAL = 300` in the low-level API as a defensive fallback, but do not rely on it as the main Home Assistant polling mechanism after coordinator migration.
 - Treat the coordinator as the scheduler and the appliance-level interval as the safety lock:
   - The coordinator prevents duplicated HA entity polling.
@@ -120,9 +121,10 @@ Keep both, with the coordinator as the normal path. The only design caveat is co
 
 ### 5. Power Log Compatibility
 
-- Keep power-log polling out of the status coordinator until `POWER_LOG.md` is implemented.
-- When adding power-log sensors, prefer a separate coordinator or a separate update method so daily kWh polling cannot multiply normal device status polling.
-- Do not put power-log data into every normal status refresh unless the endpoint has been proven safe at the same interval.
+- Implement power-log polling according to `docs/POWER_LOG.md`.
+- Keep exactly one periodic coordinator per config entry.
+- Each scheduled coordinator refresh should update normal appliance status and power-log data.
+- Power-log target cadence is 5 minutes.
 
 ## Test Plan
 
@@ -157,5 +159,5 @@ Keep both, with the coordinator as the normal path. The only design caveat is co
 
 - Panasonic cloud is sensitive to repeated polling; fewer shared calls are safer than per-entity polling.
 - Five minutes is the desired default for normal status updates.
-- Power-log polling will be handled separately according to `POWER_LOG.md`.
+- Power-log polling will be added to the shared coordinator according to `POWER_LOG.md`.
 - The direct Python API remains useful outside Home Assistant and should not depend on HA coordinator classes.

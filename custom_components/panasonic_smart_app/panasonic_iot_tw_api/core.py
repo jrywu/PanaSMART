@@ -69,6 +69,7 @@ DISCOVER_ENDPOINT = '/api/UserGetRegisteredGWList2'
 DEVICE_INFO_ENDPOINT = '/api/DeviceGetInfo'
 USER_INFO_ENDPOINT = '/api/UserGetInfo'
 DEVICE_COMMAND_ENDPOINT = '/api/DeviceSetCommand'
+POWER_LOG_ENDPOINT = '/api/PowerGetCTAreaLog'
 
 COMMAND_FAIL = '\u7121\u6cd5\u900f\u904eCommandId\u53d6\u5f97Commmand' #無法透過CommandId取得Commmand
 
@@ -331,25 +332,53 @@ class core:
         response_json = await self.fetch(method='GET', endpoint=endpoint, headers=headers, data=None, retries=retries)
         return response_json.get('status') == 'success'
 
-    async def get_power_log(self, year_back=0, months=12, retries=3):
-        """Get power log from the device."""
+    async def get_power_log(
+            self, appliance, unit='hour', from_date=None, max_num=24,
+            retries=3):
+        """Get area power log buckets for an appliance."""
         _LOGGER.debug("get_power_log()")
+        if unit not in ('hour', 'day', 'month'):
+            raise ValueError(f"Unsupported power log unit: {unit}")
         token_valid = await self.check_access_token()
         if not token_valid:
             _LOGGER.error('No valid token.')
-            return False
+            return None
         headers = self.headers.copy()
         headers['CPToken']=self.CPToken
-        del headers['auth']
+        headers['auth'] = appliance.auth
 
-        now = datetime.datetime.now()
+        if from_date is None:
+            from_date = datetime.date.today()
+        if isinstance(from_date, datetime.datetime):
+            from_date = from_date.date()
+        if isinstance(from_date, datetime.date):
+            from_value = from_date.strftime('%Y/%m/%d')
+        else:
+            from_value = str(from_date)
+
+        area_id = appliance.get_area_id()
+        try:
+            area_id = int(area_id)
+        except (TypeError, ValueError):
+            pass
+
         payload = {
-            'name': "Power",
-            'from': now.replace(year=now.year-year_back, month=1).strftime('%Y/%m/%d'),
-            'unit':'month',
-            'max_num':months
+            'gw_id': appliance.get_gwid(),
+            'area_ids': [area_id],
+            'from': from_value,
+            'unit': unit,
+            'max_num': max_num,
         }
-        return await self.fetch(method='POST', endpoint=USER_INFO_ENDPOINT, headers=headers, data=payload, retries=retries)
+        _LOGGER.debug(
+            "get_power_log() endpoint=%s unit=%s from=%s max_num=%s area_ids=%s",
+            POWER_LOG_ENDPOINT, unit, from_value, max_num, [area_id])
+        return await self.fetch(
+            method='POST',
+            endpoint=POWER_LOG_ENDPOINT,
+            headers=headers,
+            data=payload,
+            retries=retries,
+        )
 
     async def fetch(self, method: Literal['GET', 'POST'], endpoint, headers, data=None, retries=3):
         """Generic fetch function to handle device control and logs."""
@@ -377,9 +406,14 @@ class core:
                 return None
             return await self.fetch(method, endpoint, headers, data, retries=retries - 1)
 
-        if response:
+        if response is not None:
             if response.status == HTTPStatus.OK:
-                return await response.json()
+                response_json = await response.json()
+                if response_json is None:
+                    _LOGGER.warning(
+                        "fetch() endpoint %s returned empty JSON response.",
+                        endpoint)
+                return response_json
             elif response.status == HTTPStatus.TOO_MANY_REQUESTS:
                 _LOGGER.error('fetch() server disconnected for rate limitation.')
             elif response.status == HTTPStatus.EXPECTATION_FAILED:
@@ -391,6 +425,10 @@ class core:
                     if os.path.exists(self.cptoken_path):
                         os.remove(self.cptoken_path)
                 return None
+            else:
+                _LOGGER.warning(
+                    "fetch() endpoint %s returned HTTP status %s.",
+                    endpoint, response.status)
         
         if retries == 0:
             # Finish all retries and got nothing.

@@ -2,7 +2,9 @@
 import logging
 
 from homeassistant.const import (
-    CONF_ICON, CONF_NAME, CONF_TYPE, CONF_DEVICE_CLASS)
+    CONF_ICON, CONF_NAME, CONF_TYPE, CONF_DEVICE_CLASS, UnitOfEnergy)
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor.const import SensorDeviceClass
 from homeassistant.helpers.entity import Entity
 from homeassistant.util.unit_system import UnitSystem
 from homeassistant.components.climate.const import (
@@ -38,7 +40,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     """Set up Panasonic climate temperature sensors based on config_entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     entities = []
-    for appliance in coordinator.data.values():
+    for appliance in coordinator.data["appliances"].values():
+        entities.append(PanasonicEnergyMeterSensor(coordinator, appliance))
         device_type = appliance.get_device_type()
         sensor_type = None
         if device_type == 1: #AC
@@ -83,12 +86,15 @@ class PanasonicClimateSensor(CoordinatorEntity, Entity):
     @property
     def _api(self):
         """Return the cached appliance from the coordinator."""
-        return self.coordinator.data[self._appliance_id]
+        return self.coordinator.data["appliances"][self._appliance_id]
 
     @property
     def available(self):
         """Return if the device is available."""
-        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
+        return (
+            self.coordinator.last_update_success
+            and self._appliance_id in self.coordinator.data["appliances"]
+        )
 
     def get(self, key):
         """Retrieve device settings from API library cache."""
@@ -146,6 +152,81 @@ class PanasonicClimateSensor(CoordinatorEntity, Entity):
     def unit_of_measurement(self):
         """Return the unit of measurement."""
         return self._unit_of_measurement
+
+    @property
+    def device_info(self):
+        """Return a device description for device registry."""
+        return {
+            "identifiers": {(DOMAIN, self._api.get_id())},
+            "name": self._api.get_name(),
+            "manufacturer": "Panasonic",
+            "model": self._api.get_model(),
+            "sw_version": "0.0",
+            "via_device": (DOMAIN, str(self._api.get_gwid()))
+        }
+
+
+class PanasonicEnergyMeterSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a Panasonic energy meter sensor."""
+
+    def __init__(self, coordinator, api)->None:
+        """Initialize the energy meter sensor."""
+        super().__init__(coordinator)
+        self._appliance_id = api.get_id()
+        self._name = "{} Energy Meter".format(api.get_name())
+        self._id = "{}.energy_kwh".format(api.get_id())
+
+    @property
+    def _api(self):
+        """Return the cached appliance from the coordinator."""
+        return self.coordinator.data["appliances"][self._appliance_id]
+
+    async def async_added_to_hass(self):
+        """Register entity id for recorder-based completed-hour calibration."""
+        await super().async_added_to_hass()
+        if hasattr(self.coordinator, "register_energy_entity"):
+            self.coordinator.register_energy_entity(
+                self._appliance_id, self.entity_id)
+
+    @property
+    def unique_id(self):
+        """Return a unique ID."""
+        return self._id
+
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name
+
+    @property
+    def native_value(self):
+        """Return cached energy meter value in kWh."""
+        data = self.coordinator.data.get("power_logs", {}).get(
+            self._appliance_id, {})
+        return data.get("energy_kwh")
+
+    @property
+    def native_unit_of_measurement(self):
+        """Return kWh as the native unit."""
+        return UnitOfEnergy.KILO_WATT_HOUR
+
+    @property
+    def device_class(self):
+        """Return the Home Assistant energy device class."""
+        return SensorDeviceClass.ENERGY
+
+    @property
+    def state_class(self):
+        """Return total-increasing state class for Energy Dashboard."""
+        return SensorStateClass.TOTAL_INCREASING
+
+    @property
+    def available(self):
+        """Return if the energy meter has cached power-log data."""
+        return (
+            self.coordinator.last_update_success
+            and self._appliance_id in self.coordinator.data.get("power_logs", {})
+        )
 
     @property
     def device_info(self):

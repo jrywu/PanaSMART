@@ -24,7 +24,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     _LOGGER.debug('Humidifier async_setup_entry.')
     async_add_entities([
         PanasonicDehumidifierFan(coordinator, appliance)
-        for appliance in coordinator.data.values()
+        for appliance in coordinator.data["appliances"].values()
         if appliance.get_device_type() == 4
     ])
 
@@ -46,7 +46,7 @@ class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
     @property
     def _api(self):
         """Return the cached appliance from the coordinator."""
-        return self.coordinator.data[self._appliance_id]
+        return self.coordinator.data["appliances"][self._appliance_id]
 
     @property
     def supported_features(self):
@@ -66,7 +66,10 @@ class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
 
     @property
     def available(self):
-        return self.coordinator.last_update_success and self._appliance_id in self.coordinator.data
+        return (
+            self.coordinator.last_update_success
+            and self._appliance_id in self.coordinator.data["appliances"]
+        )
 
     # @property
     # def is_on(self) -> bool | None:
