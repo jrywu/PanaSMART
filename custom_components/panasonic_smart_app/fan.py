@@ -62,9 +62,11 @@ class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
         super().__init__(coordinator)
         self._appliance_id = api.get_id()
         self.device_type = self._api.get_device_type()
-        self._supported_features = FanEntityFeature.PRESET_MODE
-           # | FanEntityFeature.DIRECTION | FanEntityFeature.OSCILLATE
-           # SUPPORT_PRESET_MODE | SUPPORT_DIRECTION | SUPPORT_OSCILLATE
+        self._supported_features = (
+            FanEntityFeature.PRESET_MODE
+            | FanEntityFeature.TURN_ON
+            | FanEntityFeature.TURN_OFF
+        )
         return None
 
     @property
@@ -95,10 +97,10 @@ class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
             and self._appliance_id in self.coordinator.data["appliances"]
         )
 
-    # @property
-    # def is_on(self) -> bool | None:
-    #     """Return True if entity is on."""
-    #     return self._api.is_on()
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the dehumidifier is powered on."""
+        return self._api.is_on()
 
     @property
     def preset_mode(self) -> str | None:
@@ -114,12 +116,19 @@ class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
         return self._api.get_fan_mode_list()
 
 
-    # async def async_turn_on(self):
-    #     """Turn device on."""
-    #     return await self._api.set_power('on')
-    # async def async_turn_off(self):
-    #     """Turn device off."""
-    #     return await self._api.set_power('off')
+    async def async_turn_on(self, **kwargs):
+        """Turn the dehumidifier on from the fan entity."""
+        try:
+            return await self._api.set_power('on')
+        finally:
+            await self.coordinator.async_request_forced_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        """Turn the dehumidifier off from the fan entity."""
+        try:
+            return await self._api.set_power('off')
+        finally:
+            await self.coordinator.async_request_forced_refresh()
 
     async def async_set_preset_mode(self, preset_mode):
         """Set preset mode."""
