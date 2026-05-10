@@ -82,8 +82,8 @@ Reject unsupported units locally before network call.
   - Use `from=today`.
   - Use `max_num=24`.
   - Read only the current hour bucket for normal 5-minute updates.
-  - Compute `delta_kwh = current_hour_kwh - previous_current_hour_kwh`.
-  - Add only positive same-hour deltas to the cached HA energy meter reading.
+  - Treat the current Panasonic bucket value read during each poll as `delta_kwh`.
+  - Add only positive Panasonic deltas to the cached HA energy meter reading.
   - Expose the cached HA energy meter reading as the sensor value.
 - Do not use rolling multi-day or multi-month totals for Home Assistant Energy Dashboard:
   - Rolling windows can decrease when old buckets leave the response.
@@ -225,10 +225,11 @@ If parsing fails, keep the previous cached sensor value and log a warning. Do no
   - Set `current_hour_index = now.hour`.
   - Set `previous_current_hour_kwh = kwh[current_hour_index]`.
   - Set `current_hour_delta_kwh = 0`.
-  - Do not add the first current-hour bucket as a delta, because it may contain energy used before the integration started.
+  - If `kwh[current_hour_index] > 0`, add it to `energy_kwh`.
+  - If `kwh[current_hour_index] > 0`, also add it to `current_hour_delta_kwh`.
 - On later successful polls in the same hour:
   - `current_hour_kwh = kwh[current_hour_index]`.
-  - `delta_kwh = current_hour_kwh - previous_current_hour_kwh`.
+  - `delta_kwh = current_hour_kwh`.
   - If `delta_kwh > 0`, add it to `energy_kwh`.
   - If `delta_kwh > 0`, also add it to `current_hour_delta_kwh`.
   - If `delta_kwh <= 0`, do not subtract from `energy_kwh`; update diagnostics and keep the previous HA meter value.
@@ -240,6 +241,8 @@ If parsing fails, keep the previous cached sensor value and log a warning. Do no
   - Set `current_hour_index = now.hour`.
   - Set `previous_current_hour_kwh = kwh[current_hour_index]`.
   - Set `current_hour_delta_kwh = 0`.
+  - If `kwh[current_hour_index] > 0`, add it to `energy_kwh`.
+  - If `kwh[current_hour_index] > 0`, also add it to `current_hour_delta_kwh`.
 - On local date change:
   - Keep `energy_kwh` unchanged.
   - Reset hour tracking fields from the first new-day response.
