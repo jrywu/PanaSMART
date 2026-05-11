@@ -299,9 +299,6 @@ class PanasonicAppliance:
             self.current_hour_index = now.hour
             self.previous_current_hour_kwh = current_hour_kwh
             self.current_hour_delta_kwh = 0
-            if current_hour_kwh > 0:
-                self.energy_kwh += current_hour_kwh
-                self.current_hour_delta_kwh += current_hour_kwh
         elif self.current_hour_index != now.hour:
             completed_hour = now.replace(
                 minute=0, second=0, microsecond=0) - datetime.timedelta(hours=1)
@@ -311,11 +308,8 @@ class PanasonicAppliance:
             self.current_hour_index = now.hour
             self.previous_current_hour_kwh = current_hour_kwh
             self.current_hour_delta_kwh = 0
-            if current_hour_kwh > 0:
-                self.energy_kwh += current_hour_kwh
-                self.current_hour_delta_kwh += current_hour_kwh
         else:
-            delta_kwh = current_hour_kwh
+            delta_kwh = current_hour_kwh - self.previous_current_hour_kwh
             if delta_kwh > 0:
                 self.energy_kwh += delta_kwh
                 self.current_hour_delta_kwh += delta_kwh
