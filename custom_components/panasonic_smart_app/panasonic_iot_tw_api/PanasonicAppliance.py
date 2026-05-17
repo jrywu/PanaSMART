@@ -333,6 +333,18 @@ class PanasonicAppliance:
         """Return cached Home Assistant energy meter value in kWh."""
         return self.energy_kwh
 
+    def restore_energy_kwh(self, energy_kwh):
+        """Restore cached Home Assistant energy meter value in kWh."""
+        try:
+            restored_energy_kwh = float(energy_kwh)
+        except (TypeError, ValueError):
+            return False
+        if restored_energy_kwh < 0:
+            return False
+        if self.energy_kwh is None or restored_energy_kwh > self.energy_kwh:
+            self.energy_kwh = restored_energy_kwh
+        return True
+
     def get_power_log_delta_kwh(self):
         """Return current-hour kWh delta accumulated from power-log polling."""
         return self.current_hour_delta_kwh

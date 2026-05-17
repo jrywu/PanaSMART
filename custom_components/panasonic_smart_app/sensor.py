@@ -3,7 +3,10 @@ import logging
 
 from homeassistant.const import (
     CONF_ICON, CONF_NAME, CONF_TYPE, CONF_DEVICE_CLASS, UnitOfEnergy)
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorEntity,
+    SensorStateClass)
 from homeassistant.components.sensor.const import SensorDeviceClass
 from homeassistant.helpers.entity import Entity
 from homeassistant.util.unit_system import UnitSystem
@@ -166,7 +169,7 @@ class PanasonicClimateSensor(CoordinatorEntity, Entity):
         }
 
 
-class PanasonicEnergyMeterSensor(CoordinatorEntity, SensorEntity):
+class PanasonicEnergyMeterSensor(CoordinatorEntity, RestoreSensor):
     """Representation of a Panasonic energy meter sensor."""
 
     def __init__(self, coordinator, api)->None:
@@ -187,6 +190,16 @@ class PanasonicEnergyMeterSensor(CoordinatorEntity, SensorEntity):
         if hasattr(self.coordinator, "register_energy_entity"):
             self.coordinator.register_energy_entity(
                 self._appliance_id, self.entity_id)
+        restored_data = await self.async_get_last_sensor_data()
+        if restored_data is None:
+            return
+        if restored_data.native_unit_of_measurement not in (
+                None, UnitOfEnergy.KILO_WATT_HOUR):
+            return
+        if (hasattr(self.coordinator, "restore_energy_kwh")
+                and self.coordinator.restore_energy_kwh(
+                    self._appliance_id, restored_data.native_value)):
+            self.async_write_ha_state()
 
     @property
     def unique_id(self):

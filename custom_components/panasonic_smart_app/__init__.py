@@ -143,6 +143,27 @@ class PanasonicDataUpdateCoordinator(DataUpdateCoordinator):
         """Register the HA entity id used for completed-hour calibration."""
         self._energy_entity_ids[appliance_id] = entity_id
 
+    def restore_energy_kwh(self, appliance_id, energy_kwh) -> bool:
+        """Restore cached appliance and coordinator energy meter state."""
+        appliances = {
+            appliance.get_id(): appliance
+            for appliance in self.api.get_all_appliances() or []
+        }
+        appliance = appliances.get(appliance_id)
+        if appliance is None or not appliance.restore_energy_kwh(energy_kwh):
+            return False
+        existing_power_log = self._power_logs.get(appliance_id, {})
+        self._power_logs[appliance_id] = {
+            **existing_power_log,
+            "energy_kwh": appliance.get_energy_kwh(),
+            "delta_kwh": appliance.get_power_log_delta_kwh(),
+            "current_hour_kwh": appliance.get_power_log_current_hour_kwh(),
+            "hour_index": appliance.current_hour_index,
+            "raw": appliance.power_log_raw,
+            "last_update": appliance.get_power_log_last_update(),
+        }
+        return True
+
     async def async_request_forced_refresh(self) -> None:
         """Request one refresh that bypasses the appliance-level safety lock."""
         self._force_next_update = True
