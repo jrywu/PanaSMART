@@ -1,4 +1,4 @@
-﻿"""Support for Panasonic AC sensors."""
+"""Support for Panasonic AC sensors."""
 import logging
 
 from homeassistant.const import (
@@ -165,7 +165,6 @@ class PanasonicClimateSensor(CoordinatorEntity, Entity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }
 
 
@@ -250,5 +249,4 @@ class PanasonicEnergyMeterSensor(CoordinatorEntity, RestoreSensor):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }

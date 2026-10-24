@@ -1,4 +1,4 @@
-﻿"""Support for the Pansonic HVAC with SAA4 gateway."""
+"""Support for the Pansonic HVAC with SAA4 gateway."""
 import logging
 
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
@@ -381,5 +381,4 @@ class PanasonicClimate(CoordinatorEntity, ClimateEntity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }

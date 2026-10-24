@@ -1,4 +1,4 @@
-﻿"""Support for the Panasonic dehumidifier with SAA4 gateway."""
+"""Support for the Panasonic dehumidifier with SAA4 gateway."""
 import logging
 
 from homeassistant.components.fan import FanEntity, FanEntityFeature
@@ -159,5 +159,4 @@ class PanasonicDehumidifierFan(CoordinatorEntity, FanEntity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }

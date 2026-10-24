@@ -1,4 +1,4 @@
-﻿"""Support for Panasonic AC/ Dehumidifier binary sensors."""
+"""Support for Panasonic AC/ Dehumidifier binary sensors."""
 import logging
 
 from homeassistant.const import (
@@ -114,5 +114,4 @@ class PanasonicBinarySensor(CoordinatorEntity, BinarySensorEntity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }

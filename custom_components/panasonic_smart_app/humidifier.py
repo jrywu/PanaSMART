@@ -1,4 +1,4 @@
-﻿"""Support for the Pansonic dehumidifier with SAA4 gateway."""
+"""Support for the Pansonic dehumidifier with SAA4 gateway."""
 import logging
 
 from homeassistant.components.humidifier import PLATFORM_SCHEMA, HumidifierEntity
@@ -189,5 +189,4 @@ class PanasonicDehumidifier(CoordinatorEntity, HumidifierEntity):
             "manufacturer": "Panasonic",
             "model": self._api.get_model(),
             "sw_version": "0.0",
-            "via_device": (DOMAIN, str(self._api.get_gwid()))
         }
