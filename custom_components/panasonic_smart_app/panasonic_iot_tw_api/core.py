@@ -1,4 +1,4 @@
-﻿from aiohttp import ClientSession, ClientError, ServerDisconnectedError, ClientResponseError
+from aiohttp import ClientSession, ClientError, ServerDisconnectedError, ClientResponseError
 from http import HTTPStatus
 from typing import Literal
 import asyncio
@@ -7,6 +7,7 @@ import datetime
 import os
 import json
 import tempfile
+import time
 import logging
 from .PanasonicAppliance import PanasonicAppliance
 
@@ -63,6 +64,12 @@ HARDCODED_COMMAND_LISTS = {
 }
 
 FETCH_TIMEOUT = 20
+# Seconds to wait after a failed login before the next login attempt.
+LOGIN_RETRY_BACKOFF = 60
+# Seconds to send no requests after the server replies HTTP 429.
+RATE_LIMIT_COOLDOWN = 60
+# Minimum seconds between the starts of two requests, to stay below the server rate limit.
+REQUEST_SPACING = 1
 
 LOGIN_ENDPOINT = '/api/Userlogin1'
 DISCOVER_ENDPOINT = '/api/UserGetRegisteredGWList2'
@@ -72,6 +79,32 @@ DEVICE_COMMAND_ENDPOINT = '/api/DeviceSetCommand'
 POWER_LOG_ENDPOINT = '/api/PowerGetCTAreaLog'
 
 COMMAND_FAIL = '\u7121\u6cd5\u900f\u904eCommandId\u53d6\u5f97Commmand' #無法透過CommandId取得Commmand
+TOKEN_REJECTED_MESSAGES = (
+    '\u6b64CPToken\u5df2\u7d93\u903e\u6642', #此CPToken已經逾時
+    '\u7121\u6cd5\u4f9d\u64da\u60a8\u7684CPToken,auth\u53d6\u5f97\u76f8\u95dc\u8cc7\u6599', #無法依據您的CPToken,auth取得相關資料
+)
+# Fields that never appear in logs.
+LOG_MASKED_KEYS = ('pw', 'memid', 'refreshtoken', 'auth')
+# Fields that appear in logs with only their last 4 characters.
+LOG_PARTIAL_KEYS = ('cptoken',)
+
+
+def _redact(value):
+    """Return a copy of value with credentials masked, for logging only."""
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            name = str(key).lower()
+            if name in LOG_MASKED_KEYS:
+                redacted[key] = '***'
+            elif name in LOG_PARTIAL_KEYS and isinstance(item, str) and item:
+                redacted[key] = '***' + item[-4:]
+            else:
+                redacted[key] = _redact(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
 
 
 class core:
@@ -80,6 +113,14 @@ class core:
         self.area_list = []
         self.valid_token = False
         self.login_retries = 0
+        self.last_login_failure = None
+        self.last_login_success = None
+        self.rate_limited_until = None
+        self.request_spacing = REQUEST_SPACING
+        self.last_request_time = None
+        self.request_lock = asyncio.Lock()
+        self.login_lock = asyncio.Lock()
+        self.CPToken = None
         self.cptoken_path = os.path.join(tempfile.gettempdir(), 'cptoken.json')
         self.session = None
         self.devices = []
@@ -182,9 +223,13 @@ class core:
             'PW': self.password}
         
         response_json = await self.fetch(method='POST', endpoint=LOGIN_ENDPOINT, headers=headers, data=payload, retries=0)
-        if not response_json:
-            _LOGGER.error("Failed to get access token. Check username, password, and internet connection.")
+        if not isinstance(response_json, dict) or not response_json.get('CPToken'):
             self.login_retries += 1
+            self.last_login_failure = datetime.datetime.now()
+            _LOGGER.error(
+                "Failed to get access token (%s consecutive failures). "
+                "Check username, password, and internet connection. Response: %s",
+                self.login_retries, _redact(response_json))
             return False
             
         # Store token to file asynchronously
@@ -203,25 +248,62 @@ class core:
                         minutes=int(self.expireTime[10:12]),
                         seconds=int(self.expireTime[12:14])))
         self.login_retries = 0
+        self.last_login_failure = None
+        self.last_login_success = datetime.datetime.now()
         self.valid_token = True
         return True
 
     async def check_access_token(self):
         """Check if the access token is expired and need to be refresh."""
-        _LOGGER.debug(f'check_access_token() valid_token:{self.valid_token}, token expiry time:{self.exp}, lastcall:{self.lastcall} ')
-        now = datetime.datetime.now()
-        # CPToken expiring in 60 seconds or last call before 20mins
-        if self.login_retries > 3:
-            _LOGGER.error("Too many login retries. Check username and password and network connection.")
-            return False
-        elif (not self.valid_token or (self.exp-now).total_seconds() < 60 or (now - self.lastcall).total_seconds() > 60*20):
-                self.valid_token = False
-                self.lastcall = now
-                return await self.get_access_token()
-        else:
+        async with self.login_lock:
+            _LOGGER.debug(f'check_access_token() valid_token:{self.valid_token}, token expiry time:{self.exp}, lastcall:{self.lastcall} ')
+            now = datetime.datetime.now()
+            # CPToken expiring in 60 seconds or last call before 20mins
+            if (not self.valid_token or (self.exp-now).total_seconds() < 60 or (now - self.lastcall).total_seconds() > 60*20):
+                return await self._login_with_backoff()
             self.lastcall = now
             return True
-        
+
+    async def _renew_rejected_token(self, rejected_token):
+        """Log in again after the server rejected rejected_token.
+        Return True if a valid token is available.
+        """
+        async with self.login_lock:
+            if self.valid_token and self.CPToken != rejected_token:
+                # Another request already renewed the token.
+                return True
+            if (self.valid_token and self.last_login_success is not None
+                    and (datetime.datetime.now() - self.last_login_success).total_seconds()
+                    < LOGIN_RETRY_BACKOFF):
+                # A fresh token was rejected; logging in again will not help.
+                _LOGGER.warning("Skip login: the rejected CPToken is less than %s seconds old.",
+                                LOGIN_RETRY_BACKOFF)
+                return False
+            self._remove_cached_token()
+            return await self._login_with_backoff()
+
+    async def _login_with_backoff(self):
+        """Log in unless the last login failed recently. Call with login_lock held."""
+        self.valid_token = False
+        now = datetime.datetime.now()
+        if self.last_login_failure is not None:
+            elapsed = (now - self.last_login_failure).total_seconds()
+            if elapsed < LOGIN_RETRY_BACKOFF:
+                _LOGGER.warning(
+                    "Skip login: last login failed %.0f seconds ago.", elapsed)
+                return False
+        self.lastcall = now
+        return await self.get_access_token()
+
+    def _remove_cached_token(self):
+        """Remove the cached token file so a restart does not reuse a dead token."""
+        try:
+            os.remove(self.cptoken_path)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            _LOGGER.warning("Unable to remove cached token %s: %s", self.cptoken_path, error)
+
     async def discover_devices(self, retries=3):
         """Discover devices registered in SMART app."""
         _LOGGER.debug('discover_devices()')
@@ -330,6 +412,9 @@ class core:
         if self.debug:
             _LOGGER.debug('device_control() command url to send:'+ endpoint)
         response_json = await self.fetch(method='GET', endpoint=endpoint, headers=headers, data=None, retries=retries)
+        if not isinstance(response_json, dict):
+            _LOGGER.error('device_control() got no response for %s.', endpoint)
+            return False
         return response_json.get('status') == 'success'
 
     async def get_power_log(
@@ -380,8 +465,36 @@ class core:
             retries=retries,
         )
 
-    async def fetch(self, method: Literal['GET', 'POST'], endpoint, headers, data=None, retries=3):
+    def _rate_limited(self):
+        """Return True while the HTTP 429 cooldown is active."""
+        return (self.rate_limited_until is not None
+                and datetime.datetime.now() < self.rate_limited_until)
+
+    async def _wait_for_request_slot(self):
+        """Wait until request_spacing seconds passed since the last request start.
+        Return False, without waiting, while the HTTP 429 cooldown is active.
+        """
+        async with self.request_lock:
+            if self._rate_limited():
+                return False
+            if self.last_request_time is not None:
+                wait = self.request_spacing - (time.monotonic() - self.last_request_time)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+            # A request sent before the wait can return HTTP 429 during the wait.
+            if self._rate_limited():
+                return False
+            self.last_request_time = time.monotonic()
+            return True
+
+    async def fetch(self, method: Literal['GET', 'POST'], endpoint, headers, data=None, retries=3,
+                    retry_on_token_rejected=True):
         """Generic fetch function to handle device control and logs."""
+        if not await self._wait_for_request_slot():
+            _LOGGER.debug(
+                "fetch() skip %s: rate limited until %s.",
+                endpoint, self.rate_limited_until.strftime('%H:%M:%S'))
+            return None
         try:
             if self.session is None or self.session.closed:
                 _LOGGER.debug(f'fetch() session is not valid, create a new client session')
@@ -392,7 +505,7 @@ class core:
             if data is not None: 
                 json_data = json.dumps(data)
             
-            _LOGGER.debug(f'fetch() retries:{retries}, url:{url}; header:{headers}; data:{data}')
+            _LOGGER.debug(f'fetch() retries:{retries}, url:{url}; header:{_redact(headers)}; data:{_redact(data)}')
             response = await self.session.request(method=method, url=url, headers=headers, data=json_data, timeout=FETCH_TIMEOUT)
             
         except (asyncio.TimeoutError, ClientError, ServerDisconnectedError, ClientResponseError) as error:
@@ -415,16 +528,39 @@ class core:
                         endpoint)
                 return response_json
             elif response.status == HTTPStatus.TOO_MANY_REQUESTS:
-                _LOGGER.error('fetch() server disconnected for rate limitation.')
+                # An immediate retry makes the rate limit worse, so pause all requests.
+                self.rate_limited_until = (
+                    datetime.datetime.now()
+                    + datetime.timedelta(seconds=RATE_LIMIT_COOLDOWN))
+                _LOGGER.error(
+                    "fetch() endpoint %s: server rate limit (HTTP 429). "
+                    "No requests for %s seconds.", endpoint, RATE_LIMIT_COOLDOWN)
+                return None
             elif response.status == HTTPStatus.EXPECTATION_FAILED:
                 try:
-                    return await response.json()
-                except:
+                    response_json = await response.json()
+                except Exception:
+                    response_json = None
+                rejected_token = headers.get('CPToken')
+                if rejected_token and (
+                        not isinstance(response_json, dict)
+                        or response_json.get('StateMsg') in TOKEN_REJECTED_MESSAGES):
+                    # The server rejected the CPToken before our expiry check
+                    # noticed. Log in again and retry this request once.
+                    _LOGGER.warning(
+                        "fetch() endpoint %s rejected the CPToken: %s",
+                        endpoint, _redact(response_json))
+                    if (retry_on_token_rejected
+                            and await self._renew_rejected_token(rejected_token)):
+                        headers = headers.copy()
+                        headers['CPToken'] = self.CPToken
+                        return await self.fetch(
+                            method, endpoint, headers, data, retries=0,
+                            retry_on_token_rejected=False)
+                    return None
+                if response_json is None:
                     _LOGGER.error('fetch() server expectation failed. Login error')
-                    self.valid_token = False
-                    if os.path.exists(self.cptoken_path):
-                        os.remove(self.cptoken_path)
-                return None
+                return response_json
             else:
                 _LOGGER.warning(
                     "fetch() endpoint %s returned HTTP status %s.",

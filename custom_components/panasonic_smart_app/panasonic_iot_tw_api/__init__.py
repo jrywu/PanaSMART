@@ -1,4 +1,4 @@
-﻿"""Python module to control Panasonic SMART appliances supporting SAAnet 4 protocol."""
+"""Python module to control Panasonic SMART appliances supporting SAAnet 4 protocol."""
 import logging
 from .core import core
 from .PanasonicAppliance import PanasonicAppliance as Appliance
@@ -46,8 +46,12 @@ class panasonic_iot_tw_api:
 
     # async update all appliance status.
     async def async_update(self, force=False):
-        """Async update status of all appliances."""
+        """Async update status of all appliances.
+        Return one success flag for each appliance.
+        """
+        results = []
         if self.appliances is not None:
             for appliance in self.appliances:
-                await appliance.async_update(force=force)
+                results.append(await appliance.async_update(force=force))
+        return results
 

@@ -1,4 +1,4 @@
-﻿
+
 import json
 import logging
 import datetime
@@ -444,7 +444,7 @@ class PanasonicAppliance:
                     _LOGGER.debug(
                         "async_update() too frequent. Last call: %s, %s seconds ago.",
                         self.last_update.strftime("%H:%M:%S"), delta.seconds)
-                return
+                return True
 
         self.last_update = datetime.datetime.now()
         if self.type == 1:# and self.power != 'off': #AC
@@ -452,7 +452,7 @@ class PanasonicAppliance:
             #                                    [0, 1, 4, 0x21, 2, 0xf, 3])
             if info is None or len(info) != 3:
                 _LOGGER.error("%s async_update() failed.", self.name)
-                return
+                return False
             else:
                 if info[0]['status'] is not None and info[0]['status'] == '0':
                     self.power = 'off'
@@ -466,7 +466,7 @@ class PanasonicAppliance:
             info = await self.core.device_status(self.device,[0x21,3,2,0xf])
             if info is None or len(info) != 4:
                 _LOGGER.error("%s async_update() failed.", self.name)
-                return
+                return False
             else:
                 self.target_temperature = int(info[1]['status'])
                 self.outside_temperature = int(info[0]['status'])
@@ -487,7 +487,7 @@ class PanasonicAppliance:
                                                 [0x50, 0, 1, 7, 0xa, 4])
             if info is None or len(info) != 6:
                 _LOGGER.error("%s async_update() failed.", self.name)
-                return
+                return False
             else:
                 if(self.debug):
                     _LOGGER.debug(f'info:{info}')
@@ -509,7 +509,7 @@ class PanasonicAppliance:
                     _LOGGER.debug(self.get_status())
                 _LOGGER.debug(
                     "%s:async_update():%s", self.name, json.dumps(self.get_status()))
-
+        return True
 
     def get_status(self):
         """Return current status from local stored values."""

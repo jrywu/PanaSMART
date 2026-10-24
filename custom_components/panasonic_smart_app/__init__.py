@@ -1,4 +1,4 @@
-﻿"""Platform for Panasonic Smart App Taiwan IoT support."""
+"""Platform for Panasonic Smart App Taiwan IoT support."""
 import inspect
 import logging
 from datetime import datetime, timedelta
@@ -59,7 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     conf = entry.data
     pana_api = hass.data.setdefault(DOMAIN, {}).get(DATA_API)
     if pana_api is None:
-        _LOGGER.debug("panasonic_smart_app.async_setup_entry(): username: %s", conf[CONF_USERNAME])
+        _LOGGER.debug("panasonic_smart_app.async_setup_entry()")
         pana_api = await pana_api_setup(hass, conf[CONF_USERNAME],
                                         conf[CONF_PASSWORD], conf[CONF_HOST])
         hass.data[DOMAIN][DATA_API] = pana_api
@@ -316,8 +316,10 @@ class PanasonicDataUpdateCoordinator(DataUpdateCoordinator):
         if force:
             appliances = self.api.get_all_appliances() or []
             if appliances and all(_supports_force(appliance.async_update) for appliance in appliances):
+                results = []
                 for appliance in appliances:
-                    await appliance.async_update(force=True)
+                    results.append(await appliance.async_update(force=True))
+                _raise_if_all_failed(results)
                 return
 
             _LOGGER.warning(
@@ -326,7 +328,13 @@ class PanasonicDataUpdateCoordinator(DataUpdateCoordinator):
                 "to bypass the 5-minute lock after commands."
             )
 
-        await self.api.async_update()
+        _raise_if_all_failed(await self.api.async_update())
+
+
+def _raise_if_all_failed(results) -> None:
+    """Raise UpdateFailed when every appliance status update failed."""
+    if results and all(result is False for result in results):
+        raise UpdateFailed("All Panasonic appliance status updates failed.")
 
 
 def _supports_force(method) -> bool:
